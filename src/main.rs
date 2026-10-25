@@ -309,6 +309,17 @@ fn files_from_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+fn window_icon() -> egui::IconData {
+    let icon = image::load_from_memory(include_bytes!("../assets/icon-256.png"))
+        .expect("bundled icon decodes")
+        .into_rgba8();
+    egui::IconData {
+        width: icon.width(),
+        height: icon.height(),
+        rgba: icon.into_raw(),
+    }
+}
+
 /// Report to stderr, and in a dialog on Windows where release builds have no console.
 fn fail(msg: &str) -> ExitCode {
     eprintln!("mdeer: {msg}");
@@ -390,7 +401,8 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title(&app.title)
             .with_app_id("mdeer")
-            .with_inner_size([900.0, 1000.0]),
+            .with_inner_size([900.0, 1000.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     let result = eframe::run_native(

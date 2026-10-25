@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MDeer logo: a deer whose antlers form the letter M">
+  <rect width="512" height="512" rx="112" fill="#1a1b26"/>
+  <!-- Antlers: the letter M, with one tine on each outer stem -->
+  <g fill="none" stroke="#7aa2f7" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 262 V96 L256 232 L362 96 V262"/>
+    <path d="M150 168 L96 120 M362 168 L416 120"/>
+  </g>
+  <!-- Ears -->
+  <path d="M206 276 C170 262 140 270 122 292 C150 306 182 304 206 292 Z" fill="#e0af68"/>
+  <path d="M306 276 C342 262 372 270 390 292 C362 306 330 304 306 292 Z" fill="#e0af68"/>
+  <!-- Face -->
+  <path d="M196 256 Q256 238 316 256 Q320 330 284 404 Q256 446 228 404 Q192 330 196 256 Z" fill="#e0af68"/>
+  <circle cx="230" cy="306" r="11" fill="#1a1b26"/>
+  <circle cx="282" cy="306" r="11" fill="#1a1b26"/>
+  <ellipse cx="256" cy="412" rx="18" ry="13" fill="#1a1b26"/>
+</svg>
