@@ -328,6 +328,7 @@ fn run_flag(flag: &str) -> Option<ExitCode> {
         "--register" => register::register().map(|()| "MDeer is now registered for .md files."),
         #[cfg(windows)]
         "--unregister" => register::unregister().map(|()| "MDeer's .md registration was removed."),
+        #[cfg(not(windows))]
         "--register" | "--unregister" => Err(std::io::Error::other(
             "file association is only supported on Windows",
         )),
