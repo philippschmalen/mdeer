@@ -22,8 +22,11 @@ impl Doc {
         let path = std::path::absolute(path)?;
         let text = std::fs::read_to_string(&path)?;
         let dir = path.parent().unwrap_or(Path::new("."));
+        // egui's file loader wants `file:///C:/dir` on Windows and `file:///dir` elsewhere.
+        let dir = dir.to_string_lossy().replace('\\', "/");
+        let slash = if dir.starts_with('/') { "" } else { "/" };
         Ok(Self {
-            image_base: format!("file://{}/", dir.display()),
+            image_base: format!("file://{slash}{dir}/"),
             path,
             text,
             cache: CommonMarkCache::default(),
