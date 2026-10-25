@@ -12,9 +12,12 @@ pub const BG_HIGHLIGHT: Color32 = hex(0x292e42);
 pub const BG_VISUAL: Color32 = hex(0x283457);
 pub const FG: Color32 = hex(0xc0caf5);
 pub const FG_DARK: Color32 = hex(0xa9b1d6);
+pub const COMMENT: Color32 = hex(0x565f89);
 pub const TERMINAL_BLACK: Color32 = hex(0x414868);
 pub const BLUE: Color32 = hex(0x7aa2f7);
 pub const CYAN: Color32 = hex(0x7dcfff);
+pub const GREEN: Color32 = hex(0x9ece6a);
+pub const ORANGE: Color32 = hex(0xff9e64);
 pub const YELLOW: Color32 = hex(0xe0af68);
 pub const RED: Color32 = hex(0xf7768e);
 

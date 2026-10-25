@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod source;
 mod theme;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use eframe::egui;
+use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
+use egui::text::{CCursor, CCursorRange, LayoutJob};
 use egui_commonmark::{CommonMarkCache, CommonMarkScrollOptions, CommonMarkViewer};
 
 struct Doc {
@@ -14,6 +16,9 @@ struct Doc {
     cache: CommonMarkCache,
     /// `file://<dir>/` so relative image paths resolve next to the file.
     image_base: String,
+    editing: bool,
+    /// Source-view highlighting, keyed by a hash of text and font.
+    highlight: (u64, LayoutJob),
 }
 
 impl Doc {
@@ -30,6 +35,8 @@ impl Doc {
             path,
             text,
             cache: CommonMarkCache::default(),
+            editing: false,
+            highlight: Default::default(),
         })
     }
 
@@ -43,20 +50,106 @@ struct App {
     doc: Doc,
 }
 
+const CTRL: Modifiers = Modifiers::COMMAND;
+
+fn pressed(ui: &egui::Ui, key: Key) -> bool {
+    ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(CTRL, key)))
+}
+
+impl Doc {
+    fn id(&self) -> egui::Id {
+        egui::Id::unique(&self.path)
+    }
+
+    fn reading_view(&mut self, ui: &mut egui::Ui) {
+        CommonMarkViewer::new()
+            .default_implicit_uri_scheme(&self.image_base)
+            .enable_scroll_to_heading(true)
+            .show_scrollable(
+                self.id(),
+                ui,
+                &mut self.cache,
+                &CommonMarkScrollOptions::default().viewport_cache(true),
+                &self.text,
+            );
+    }
+
+    fn source_view(&mut self, ui: &mut egui::Ui, focus: bool) {
+        let id = self.id().with("source");
+        for (key, before, after) in [
+            (Key::B, "**", "**"),
+            (Key::I, "*", "*"),
+            (Key::K, "[", "]()"),
+        ] {
+            if pressed(ui, key) {
+                self.format_selection(ui.ctx(), id, before, after);
+            }
+        }
+
+        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        let cache = &mut self.highlight;
+        let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
+            let key = egui::util::hash((buf.as_str(), &font));
+            if cache.0 != key {
+                *cache = (key, source::highlight(buf.as_str(), &font));
+            }
+            let mut job = cache.1.clone();
+            job.wrap.max_width = wrap_width;
+            ui.fonts_mut(|f| f.layout_job(job))
+        };
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let response = egui::TextEdit::multiline(&mut self.text)
+                .id(id)
+                .frame(egui::Frame::NONE)
+                .desired_width(f32::INFINITY)
+                .lock_focus(true)
+                .layouter(&mut layouter)
+                .show(ui)
+                .response;
+            if focus {
+                response.request_focus();
+            }
+        });
+    }
+
+    /// Obsidian-style Ctrl+B/I/K: wrap the selection (or insert markers at the cursor).
+    fn format_selection(&mut self, ctx: &egui::Context, id: egui::Id, before: &str, after: &str) {
+        let Some(mut state) = egui::TextEdit::load_state(ctx, id) else {
+            return;
+        };
+        let Some(range) = state.cursor.char_range() else {
+            return;
+        };
+        let sel = range.as_sorted_char_range();
+        let new = source::wrap(&mut self.text, sel.start.0..sel.end.0, before, after);
+        let new = if after == "]()" {
+            // Link: put the cursor inside the empty `()`.
+            CCursorRange::one(CCursor::new(new.end + 2))
+        } else {
+            CCursorRange::two(CCursor::new(new.start), CCursor::new(new.end))
+        };
+        state.cursor.set_char_range(Some(new));
+        state.store(ctx, id);
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let doc = &mut self.doc;
+        let toggled = pressed(ui, Key::E);
+        if toggled {
+            doc.editing = !doc.editing;
+            if !doc.editing {
+                // The viewport cache doesn't notice text changes on its own.
+                doc.cache.clear_viewer(&doc.id());
+            }
+        }
         egui::CentralPanel::default().show(ui, |ui| {
-            let doc = &mut self.doc;
-            CommonMarkViewer::new()
-                .default_implicit_uri_scheme(&doc.image_base)
-                .enable_scroll_to_heading(true)
-                .show_scrollable(
-                    egui::Id::unique(&doc.path),
-                    ui,
-                    &mut doc.cache,
-                    &CommonMarkScrollOptions::default().viewport_cache(true),
-                    &doc.text,
-                );
+            if doc.editing {
+                doc.source_view(ui, toggled);
+            } else {
+                doc.reading_view(ui);
+            }
         });
     }
 }

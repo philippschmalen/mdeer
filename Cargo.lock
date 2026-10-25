@@ -1740,6 +1740,7 @@ dependencies = [
  "egui_commonmark",
  "egui_extras",
  "image",
+ "pulldown-cmark",
 ]
 
 [[package]]
