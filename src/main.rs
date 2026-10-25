@@ -339,6 +339,27 @@ fn run_flag(flag: &str) -> Option<ExitCode> {
     })
 }
 
+/// WSLg has no DRM render node: Mesa probes for one, tries Zink, and only then
+/// falls back, printing warnings at each step. Pin its native D3D12 driver and
+/// mute EGL's probe noise. Re-exec because `set_var` is unsafe.
+fn wslg_gl() {
+    use std::os::unix::process::CommandExt;
+    if std::env::var_os("GALLIUM_DRIVER").is_some()
+        || !Path::new("/usr/lib/wsl/lib/libd3d12.so").exists()
+    {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    // exec only returns on failure; then carry on with Mesa's defaults.
+    let _ = std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env("GALLIUM_DRIVER", "d3d12")
+        .env("EGL_LOG_LEVEL", "fatal")
+        .exec();
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag] = args.as_slice()
@@ -361,6 +382,7 @@ fn main() -> ExitCode {
     if instance::forward(&socket, &files) {
         return ExitCode::SUCCESS;
     }
+    wslg_gl();
     let listener = instance::bind(&socket);
 
     let mut app = App {
@@ -390,6 +412,8 @@ fn main() -> ExitCode {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
+            // egui's 12.5pt body text is tiny at 1x; Ctrl +/- still adjusts from here.
+            cc.egui_ctx.set_zoom_factor(1.8);
             egui_extras::install_image_loaders(&cc.egui_ctx);
             let ctx = cc.egui_ctx.clone();
             app.inbox = listener.map(|l| instance::serve(l, move || ctx.request_repaint()));
