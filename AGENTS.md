@@ -32,6 +32,8 @@
 	- commit early and often
 	- push your changes to remote
 	- merge to main
+- agents work in the beads **team-maintainer** profile: commit, push, merge to main, `bd dolt push` and release without asking (a current "don't" instruction still wins)
+- releases: bump `version` in `Cargo.toml` (semver), merge to main, then tag `vX.Y.Z` and push the tag; `release.yml` builds `mdeer.exe` and publishes the GitHub Release. No permission needed to tag or push.
 - prefer git worktrees to work in parallel
 - use determinist quality-gates where reasonable
 	- add reasonable pre-commit hooks based on modern Rust standards, tooling and conventions
