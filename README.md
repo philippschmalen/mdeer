@@ -2,29 +2,24 @@
 
 # MDeer
 
-A lightweight markdown reader and editor, like Notepad but for markdown. Written in Rust, Tokyo Night themed, starts in well under a second.
+A lightweight markdown reader and editor, like Notepad but for markdown. Written in Rust, Tokyo Night themed, starts in well under a second. Runs natively on Ubuntu, and on Windows 11 through WSL2.
 
 - Opens files rendered (reading view); `Ctrl+E` switches to a syntax-highlighted source view
 - Autosaves as you type; no projects, workspaces or remembered sessions
 - One window, files as tabs; opening another file adds a tab to the running window
 - Local images, relative links between notes, clickable task checkboxes
 
-## Quickstart (Windows)
+## Quickstart
 
-In PowerShell:
+On Ubuntu 24.04+, or in an Ubuntu 24.04+ WSL2 distro on Windows 11:
 
-```powershell
-irm https://raw.githubusercontent.com/philippschmalen/mdeer/main/install.ps1 | iex
+```sh
+curl -fsSL https://raw.githubusercontent.com/philippschmalen/mdeer/main/install.sh | sh
 ```
 
-This installs `mdeer.exe` to `%LOCALAPPDATA%\Programs\MDeer`, puts it on your `PATH` and registers it for `.md` files. No admin rights are needed. Then double-click any `.md` file. If Windows already uses another app for `.md`, pick MDeer once under **Open with → Choose another app**.
+This installs `mdeer` to `~/.local/bin` and makes it the default app for markdown. No sudo is needed. Then run `mdeer notes.md`.
 
-<details>
-<summary>Downloaded <code>mdeer.exe</code> from the releases page and got "Windows protected your PC"?</summary>
-
-MDeer isn't code-signed yet, so SmartScreen blocks browser downloads of it. Click **More info → Run anyway**, or unblock the file first: right-click → **Properties** → tick **Unblock**, or run `Unblock-File .\mdeer.exe`. Then run `mdeer --register` once.
-
-</details>
+**Windows 11:** the installer also adds MDeer to Explorer's **Open with** menu for `.md` files. To make it the default, right-click a `.md` file → **Open with** → **Choose another app** → **MDeer** → **Always**. Files on `C:\` and inside WSL (`\\wsl.localhost\...`) both work. MDeer runs inside WSL and shows its window through WSLg; Windows only starts `wsl.exe`, so no unsigned `.exe` is involved.
 
 ## Usage
 
@@ -32,8 +27,8 @@ MDeer isn't code-signed yet, so SmartScreen blocks browser downloads of it. Clic
 mdeer notes.md        # open a file
 mdeer a.md b.md       # open several as tabs
 mdeer                 # open every .md in the current folder as tabs
-mdeer --register      # Windows: associate .md files with MDeer
-mdeer --unregister    # Windows: remove that association
+mdeer --register      # desktop entry + default app (+ Explorer "Open with" in WSL)
+mdeer --unregister    # undo --register
 ```
 
 | Shortcut | Action |
@@ -45,15 +40,13 @@ mdeer --unregister    # Windows: remove that association
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
 
-To uninstall: `mdeer --unregister`, then delete `%LOCALAPPDATA%\Programs\MDeer`.
+To uninstall: `mdeer --unregister && rm ~/.local/bin/mdeer`.
 
 ## Build from source
 
 ```sh
-cargo install --git https://github.com/philippschmalen/mdeer   # or: cargo build --release
+cargo install --git https://github.com/philippschmalen/mdeer
 ```
-
-Linux and macOS builds work too; `--register` is Windows-only.
 
 ## Development
 

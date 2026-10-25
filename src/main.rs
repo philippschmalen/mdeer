@@ -1,9 +1,6 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
+mod desktop;
 mod doc;
 mod instance;
-#[cfg(windows)]
-mod register;
 mod source;
 mod theme;
 
@@ -289,7 +286,8 @@ impl eframe::App for App {
 /// `mdeer <file>...` opens those files; bare `mdeer` opens every `.md` in the current directory.
 fn files_from_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     if !args.is_empty() {
-        return Ok(args.iter().map(PathBuf::from).collect());
+        let path = |a: &String| desktop::from_windows_path(a).unwrap_or_else(|| PathBuf::from(a));
+        return Ok(args.iter().map(path).collect());
     }
     let dir = std::env::current_dir().map_err(|e| e.to_string())?;
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -320,39 +318,21 @@ fn window_icon() -> egui::IconData {
     }
 }
 
-/// Report to stderr, and in a dialog on Windows where release builds have no console.
 fn fail(msg: &str) -> ExitCode {
     eprintln!("mdeer: {msg}");
-    #[cfg(windows)]
-    rfd::MessageDialog::new()
-        .set_title("MDeer")
-        .set_description(msg)
-        .set_level(rfd::MessageLevel::Error)
-        .show();
     ExitCode::FAILURE
 }
 
 /// `--register` / `--unregister`; `None` if `flag` is not one of them.
 fn run_flag(flag: &str) -> Option<ExitCode> {
-    let result: std::io::Result<&str> = match flag {
-        #[cfg(windows)]
-        "--register" => register::register().map(|()| "MDeer is now registered for .md files."),
-        #[cfg(windows)]
-        "--unregister" => register::unregister().map(|()| "MDeer's .md registration was removed."),
-        #[cfg(not(windows))]
-        "--register" | "--unregister" => Err(std::io::Error::other(
-            "file association is only supported on Windows",
-        )),
+    let result = match flag {
+        "--register" => desktop::register(),
+        "--unregister" => desktop::unregister(),
         _ => return None,
     };
     Some(match result {
-        Ok(msg) => {
-            println!("{msg}");
-            #[cfg(windows)]
-            rfd::MessageDialog::new()
-                .set_title("MDeer")
-                .set_description(msg)
-                .show();
+        Ok(log) => {
+            log.iter().for_each(|line| println!("{line}"));
             ExitCode::SUCCESS
         }
         Err(e) => fail(&e.to_string()),

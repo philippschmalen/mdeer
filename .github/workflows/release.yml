@@ -7,12 +7,14 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  linux:
+    # Pinned: the binary needs the build host's glibc, so this sets the oldest supported Ubuntu.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked
-      - run: gh release create "$env:GITHUB_REF_NAME" target/release/mdeer.exe --generate-notes
+      - run: cp target/release/mdeer mdeer-x86_64-linux
+      - run: gh release create "$GITHUB_REF_NAME" mdeer-x86_64-linux --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

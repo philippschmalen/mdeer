@@ -2,7 +2,7 @@
 description = "Lightweight markdown reader and editor"
 license = "MIT"
 name = "mdeer"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -29,9 +29,3 @@ strip = true
 [features]
 # dev only: EFRAME_SCREENSHOT_TO=out.png cargo run -F screenshot -- file.md
 screenshot = ["eframe/__screenshot"]
-
-[target."cfg(windows)".dependencies]
-winreg = "0.56"
-
-[build-dependencies]
-winresource = "0.1"
