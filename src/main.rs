@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod doc;
+mod instance;
 mod source;
 mod theme;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc::Receiver;
 
 use doc::Doc;
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, OutputCommand, ViewportCommand};
@@ -14,6 +16,8 @@ struct App {
     docs: Vec<Doc>,
     active: usize,
     title: String,
+    /// Files forwarded by later `mdeer` invocations.
+    inbox: Option<Receiver<PathBuf>>,
 }
 
 const CTRL: Modifiers = Modifiers::COMMAND;
@@ -148,6 +152,21 @@ impl App {
         }
     }
 
+    fn receive_forwarded(&mut self, ctx: &egui::Context) {
+        let Some(inbox) = &self.inbox else { return };
+        let paths: Vec<PathBuf> = inbox.try_iter().collect();
+        if paths.is_empty() {
+            return;
+        }
+        for path in paths {
+            if let Err(e) = self.open(&path) {
+                self.docs[self.active].error = Some(format!("{}: {e}", path.display()));
+            }
+        }
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+    }
+
     /// Conflict or save error, with the actions that resolve it.
     fn banner(&mut self, ui: &mut egui::Ui) {
         let doc = &mut self.docs[self.active];
@@ -212,6 +231,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.receive_forwarded(ui.ctx());
         let focus_change = ui.input(|i| {
             i.events.iter().find_map(|e| match e {
                 egui::Event::WindowFocused(f) => Some(*f),
@@ -296,10 +316,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The running instance has another working directory.
+    let files: Vec<PathBuf> = files
+        .iter()
+        .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
+        .collect();
+    let socket = instance::socket_name();
+    if instance::forward(&socket, &files) {
+        return ExitCode::SUCCESS;
+    }
+    let listener = instance::bind(&socket);
+
     let mut app = App {
         docs: Vec::new(),
         active: 0,
         title: String::new(),
+        inbox: None,
     };
     for file in &files {
         if let Err(e) = app.open(file) {
@@ -323,6 +355,8 @@ fn main() -> ExitCode {
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            let ctx = cc.egui_ctx.clone();
+            app.inbox = listener.map(|l| instance::serve(l, move || ctx.request_repaint()));
             Ok(Box::new(app))
         }),
     );

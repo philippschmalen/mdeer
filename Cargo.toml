@@ -11,6 +11,7 @@ egui = { version = "0.37", default-features = false, features = ["monochrome_emo
 egui_commonmark = { version = "0.26", default-features = false, features = ["pulldown_cmark", "load-images"] }
 egui_extras = { version = "0.37", default-features = false, features = ["image", "file"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+interprocess = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 rfd = "0.17"
 
