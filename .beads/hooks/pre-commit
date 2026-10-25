@@ -57,3 +57,8 @@ if command -v bd >/dev/null 2>&1; then
   if [ "$_bd_exit" -ne 0 ]; then exit "$_bd_exit"; fi
 fi
 # --- END BEADS INTEGRATION v1.3.1 ---
+
+# --- mdeer quality gates ---
+PATH="$HOME/.cargo/bin:$PATH"
+cargo fmt --check || { echo >&2 "pre-commit: run 'cargo fmt'"; exit 1; }
+cargo clippy --quiet --all-targets -- -D warnings || exit 1

@@ -8,7 +8,8 @@
 ## Features
 
 - blazingly fast, beautifully simple, lightweight
-- open single files per window, no project or workspace management
+- one window, files as tabs (tab bar hidden for a single file), no project or workspace management
+	- single instance: opening another file (CLI or Explorer) adds a tab to the running window
 	- autosave changes
 	- when closed, do not remember opened files
 	- assets: render images, resolve relative links
@@ -33,7 +34,7 @@
 	- merge to main
 - prefer git worktrees to work in parallel
 - use determinist quality-gates where reasonable
-	- add reasonable pre-commit hooks based on modern Rust standards, tooling and ocnventions
+	- add reasonable pre-commit hooks based on modern Rust standards, tooling and conventions
 	- add a postToolUse agent hook to automatically format, lint, type-check after editing a file
 	- when using `git commit -m '<message>'`: add a preToolUse hook that removes any co-authorship messages like "Co-authored-by: ..."
 	
