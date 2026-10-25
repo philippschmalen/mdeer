@@ -11,7 +11,7 @@ use crate::{pressed, source};
 
 pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
 /// Above this, the reading view is virtualized and task checkboxes are read-only.
-const CHECKBOX_MAX_BYTES: usize = 200_000;
+const CHECKBOX_MAX_BYTES: usize = 100_000;
 
 /// What we last saw on disk, to notice writes by other programs.
 type Stamp = Option<(SystemTime, u64)>;
@@ -358,5 +358,54 @@ mod tests {
             }
         }
         panic!("{uri}: still pending");
+    }
+
+    /// Perf smoke check against the targets (startup <= 1 s, reaction < 50 ms), CPU side only.
+    /// Not a CI gate (runners are noisy): `cargo test --release -- --ignored --nocapture perf`
+    #[test]
+    #[ignore]
+    fn perf_smoke() {
+        let block = include_str!("../AGENTS.md");
+        for size in [CHECKBOX_MAX_BYTES, 1_000_000] {
+            let mut doc = temp_doc(&format!("perf-{size}"), &block.repeat(size / block.len()));
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx);
+            let input = |events| egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let frame = |doc: &mut Doc, events, focus| {
+                let t = Instant::now();
+                let out = ctx.run_ui(input(events), |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        if doc.editing {
+                            doc.source_view(ui, focus);
+                        } else {
+                            doc.reading_view(ui);
+                        }
+                    });
+                });
+                let _ = ctx.tessellate(out.shapes, out.pixels_per_point);
+                t.elapsed()
+            };
+            let first = frame(&mut doc, vec![], false);
+            let reading = frame(&mut doc, vec![], false);
+            doc.toggle_editing();
+            let source_first = frame(&mut doc, vec![], true);
+            let len = doc.text.len();
+            let keystroke = frame(&mut doc, vec![egui::Event::Text("x".into())], false);
+            assert_eq!(doc.text.len(), len + 1, "keystroke reached the editor");
+            eprintln!(
+                "{size:>8} B: first frame {first:?}, reading frame {reading:?}, \
+                 source first frame {source_first:?}, keystroke {keystroke:?}"
+            );
+            assert!(first < Duration::from_secs(1));
+            assert!(reading < Duration::from_millis(50));
+            assert!(keystroke < Duration::from_millis(50));
+        }
     }
 }
