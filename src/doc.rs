@@ -19,6 +19,13 @@ fn stamp(path: &Path) -> Stamp {
     Some((meta.modified().ok()?, meta.len()))
 }
 
+/// `file:///C:/dir` on Windows, `file:///dir` elsewhere (the form egui's file loader expects).
+pub fn file_url(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let slash = if path.starts_with('/') { "" } else { "/" };
+    format!("file://{slash}{path}")
+}
+
 pub struct Doc {
     pub path: PathBuf,
     pub text: String,
@@ -41,12 +48,8 @@ impl Doc {
         // `absolute`, not `canonicalize`: Windows verbatim `\\?\` paths break `file://` image URIs.
         let path = std::path::absolute(path)?;
         let text = std::fs::read_to_string(&path)?;
-        let dir = path.parent().unwrap_or(Path::new("."));
-        // egui's file loader wants `file:///C:/dir` on Windows and `file:///dir` elsewhere.
-        let dir = dir.to_string_lossy().replace('\\', "/");
-        let slash = if dir.starts_with('/') { "" } else { "/" };
         Ok(Self {
-            image_base: format!("file://{slash}{dir}/"),
+            image_base: file_url(path.parent().unwrap_or(Path::new("."))) + "/",
             disk: stamp(&path),
             path,
             text,
@@ -59,9 +62,21 @@ impl Doc {
         })
     }
 
+    pub fn name(&self) -> String {
+        self.path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    }
+
     pub fn title(&self) -> String {
-        let name = self.path.file_name().unwrap_or_default().to_string_lossy();
-        format!("{name} — MDeer")
+        format!("{} — MDeer", self.name())
+    }
+
+    /// Scroll the reading view to the heading with this `{#anchor}`.
+    pub fn scroll_to(&mut self, anchor: String) {
+        self.cache.scroll_to_heading(&self.id(), Some(anchor));
     }
 
     fn id(&self) -> egui::Id {

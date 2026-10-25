@@ -12,6 +12,7 @@ egui_commonmark = { version = "0.26", default-features = false, features = ["pul
 egui_extras = { version = "0.37", default-features = false, features = ["image", "file"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 pulldown-cmark = { version = "0.13", default-features = false }
+rfd = "0.17"
 
 [lints.rust]
 unsafe_code = "forbid"

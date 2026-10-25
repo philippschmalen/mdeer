@@ -4,26 +4,153 @@ mod doc;
 mod source;
 mod theme;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use doc::Doc;
-use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
+use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, OutputCommand, ViewportCommand};
 
 struct App {
-    doc: Doc,
+    docs: Vec<Doc>,
+    active: usize,
+    title: String,
 }
 
 const CTRL: Modifiers = Modifiers::COMMAND;
 
 fn pressed(ui: &egui::Ui, key: Key) -> bool {
-    ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(CTRL, key)))
+    pressed_with(ui, CTRL, key)
+}
+
+fn pressed_with(ui: &egui::Ui, modifiers: Modifiers, key: Key) -> bool {
+    ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+}
+
+/// Decodes `%XX` escapes (e.g. `My%20Note.md`); invalid escapes stay as-is.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = b
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok());
+        match hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+            Some(byte) if b[i] == b'%' => {
+                out.push(byte);
+                i += 3;
+            }
+            _ => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A link without a URI scheme, resolved against `dir`: `(path, #anchor)`.
+fn local_link(dir: &Path, url: &str) -> Option<(PathBuf, Option<String>)> {
+    let scheme = url
+        .find(':')
+        .is_some_and(|c| !url[..c].contains(['/', '#']));
+    if scheme || url.starts_with('#') {
+        return None;
+    }
+    let (path, anchor) = match url.split_once('#') {
+        Some((p, a)) => (p, Some(a.to_owned())),
+        None => (url, None),
+    };
+    Some((dir.join(percent_decode(path)), anchor))
 }
 
 impl App {
+    /// Focus `path` if it is already open, else open it in a new tab.
+    fn open(&mut self, path: &Path) -> std::io::Result<()> {
+        let canonical = std::fs::canonicalize(path)?;
+        let existing = self
+            .docs
+            .iter()
+            .position(|d| std::fs::canonicalize(&d.path).is_ok_and(|p| p == canonical));
+        self.active = match existing {
+            Some(i) => i,
+            None => {
+                self.docs.push(Doc::open(path)?);
+                self.docs.len() - 1
+            }
+        };
+        Ok(())
+    }
+
+    fn open_dialog(&mut self) {
+        let mut dialog = rfd::FileDialog::new().add_filter("Markdown", &["md", "markdown"]);
+        if let Some(dir) = self.docs[self.active].path.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        for path in dialog.pick_files().unwrap_or_default() {
+            if let Err(e) = self.open(&path) {
+                self.docs[self.active].error = Some(format!("{}: {e}", path.display()));
+            }
+        }
+    }
+
+    /// Returns false once the last tab is closed.
+    fn close_active(&mut self) -> bool {
+        let mut doc = self.docs.remove(self.active);
+        doc.autosave(true);
+        self.active = self.active.min(self.docs.len().saturating_sub(1));
+        !self.docs.is_empty()
+    }
+
+    fn shortcuts(&mut self, ui: &egui::Ui) {
+        let n = self.docs.len();
+        if pressed(ui, Key::O) {
+            self.open_dialog();
+        }
+        if pressed(ui, Key::W) && !self.close_active() {
+            ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+        }
+        // Shift first: consume_shortcut ignores extra Shift when matching Ctrl+Tab.
+        if pressed_with(ui, CTRL | Modifiers::SHIFT, Key::Tab) {
+            self.active = (self.active + n - 1) % n;
+        } else if pressed(ui, Key::Tab) {
+            self.active = (self.active + 1) % n;
+        }
+    }
+
+    /// Only shown with more than one file open.
+    fn tab_bar(&mut self, ui: &mut egui::Ui) {
+        if self.docs.len() < 2 {
+            return;
+        }
+        let mut close = None;
+        egui::Panel::top("tabs").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, doc) in self.docs.iter().enumerate() {
+                    let tab = ui.selectable_label(i == self.active, doc.name());
+                    if tab.clicked() {
+                        self.active = i;
+                    }
+                    if tab.middle_clicked() || ui.small_button("×").clicked() {
+                        close = Some(i);
+                    }
+                }
+            });
+        });
+        if let Some(i) = close {
+            self.active = i;
+            self.close_active();
+        }
+    }
+
     /// Conflict or save error, with the actions that resolve it.
     fn banner(&mut self, ui: &mut egui::Ui) {
-        let doc = &mut self.doc;
+        let doc = &mut self.docs[self.active];
         if !doc.conflict && doc.error.is_none() {
             return;
         }
@@ -46,6 +173,41 @@ impl App {
             });
         });
     }
+
+    /// Relative links open as tabs (markdown) or with the system default app
+    /// (anything else); `scheme://` links are left for egui to open in the browser.
+    fn follow_local_links(&mut self, ctx: &egui::Context) {
+        let Some(dir) = self.docs[self.active].path.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        let mut targets = Vec::new();
+        ctx.output_mut(|o| {
+            for cmd in &mut o.commands {
+                if let OutputCommand::OpenUrl(open) = cmd
+                    && let Some((path, anchor)) = local_link(&dir, &open.url)
+                {
+                    if is_markdown(&path) {
+                        targets.push((path, anchor));
+                        open.url.clear();
+                    } else {
+                        open.url = doc::file_url(&path);
+                    }
+                }
+            }
+            o.commands
+                .retain(|c| !matches!(c, OutputCommand::OpenUrl(open) if open.url.is_empty()));
+        });
+        for (path, anchor) in targets {
+            match self.open(&path) {
+                Ok(()) => {
+                    if let Some(anchor) = anchor {
+                        self.docs[self.active].scroll_to(anchor);
+                    }
+                }
+                Err(e) => self.docs[self.active].error = Some(format!("{}: {e}", path.display())),
+            }
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -56,21 +218,28 @@ impl eframe::App for App {
                 _ => None,
             })
         });
-        match focus_change {
-            Some(true) => self.doc.sync_from_disk(),
-            Some(false) => self.doc.autosave(true),
-            None => self.doc.autosave(false),
-        }
-        if self.doc.edited_at.is_some() {
-            ui.ctx().request_repaint_after(doc::AUTOSAVE_DELAY);
+        for doc in &mut self.docs {
+            match focus_change {
+                Some(true) => doc.sync_from_disk(),
+                Some(false) => doc.autosave(true),
+                None => doc.autosave(false),
+            }
+            if doc.edited_at.is_some() {
+                ui.ctx().request_repaint_after(doc::AUTOSAVE_DELAY);
+            }
         }
 
+        self.shortcuts(ui);
+        if self.docs.is_empty() {
+            return;
+        }
         let toggled = pressed(ui, Key::E);
         if toggled {
-            self.doc.toggle_editing();
+            self.docs[self.active].toggle_editing();
         }
+        self.tab_bar(ui);
         self.banner(ui);
-        let doc = &mut self.doc;
+        let doc = &mut self.docs[self.active];
         egui::CentralPanel::default().show(ui, |ui| {
             if doc.editing {
                 doc.source_view(ui, toggled);
@@ -78,30 +247,72 @@ impl eframe::App for App {
                 doc.reading_view(ui);
             }
         });
+        self.follow_local_links(ui.ctx());
+
+        let title = self.docs[self.active].title();
+        if title != self.title {
+            ui.ctx()
+                .send_viewport_cmd(ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.doc.autosave(true);
+        for doc in &mut self.docs {
+            doc.autosave(true);
+        }
     }
+}
+
+/// `mdeer <file>...` opens those files; bare `mdeer` opens every `.md` in the current directory.
+fn files_from_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
+    if !args.is_empty() {
+        return Ok(args.iter().map(PathBuf::from).collect());
+    }
+    let dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(|e| Some(e.ok()?.path()))
+        .filter(|p| p.is_file() && is_markdown(p))
+        .collect();
+    files.sort_by_key(|p| {
+        p.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase()
+    });
+    if files.is_empty() {
+        return Err(format!("no .md files in {}", dir.display()));
+    }
+    Ok(files)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [file] = args.as_slice() else {
-        eprintln!("usage: mdeer <file>");
-        return ExitCode::FAILURE;
-    };
-    let doc = match Doc::open(Path::new(file)) {
-        Ok(doc) => doc,
+    let files = match files_from_args(&args) {
+        Ok(files) => files,
         Err(e) => {
-            eprintln!("mdeer: {file}: {e}");
+            eprintln!("mdeer: {e}");
             return ExitCode::FAILURE;
         }
     };
+    let mut app = App {
+        docs: Vec::new(),
+        active: 0,
+        title: String::new(),
+    };
+    for file in &files {
+        if let Err(e) = app.open(file) {
+            eprintln!("mdeer: {}: {e}", file.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    app.active = 0;
+    app.title = app.docs[0].title();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title(doc.title())
+            .with_title(&app.title)
             .with_app_id("mdeer")
             .with_inner_size([900.0, 1000.0]),
         ..Default::default()
@@ -112,7 +323,7 @@ fn main() -> ExitCode {
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(App { doc }))
+            Ok(Box::new(app))
         }),
     );
     match result {
@@ -121,5 +332,32 @@ fn main() -> ExitCode {
             eprintln!("mdeer: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_links() {
+        let dir = Path::new("/notes");
+        assert_eq!(local_link(dir, "https://x.org/a.md"), None);
+        assert_eq!(local_link(dir, "mailto:a@b.c"), None);
+        assert_eq!(local_link(dir, "#top"), None);
+        assert_eq!(
+            local_link(dir, "sub/My%20Note.md#intro"),
+            Some((dir.join("sub/My Note.md"), Some("intro".into())))
+        );
+        assert_eq!(
+            local_link(dir, "../a.md"),
+            Some((dir.join("../a.md"), None))
+        );
+    }
+
+    #[test]
+    fn percent_decoding() {
+        assert_eq!(percent_decode("a%20b%zz%"), "a b%zz%");
+        assert_eq!(percent_decode("%C3%A9"), "é");
     }
 }
