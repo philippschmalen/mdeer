@@ -29,3 +29,6 @@ strip = true
 [features]
 # dev only: EFRAME_SCREENSHOT_TO=out.png cargo run -F screenshot -- file.md
 screenshot = ["eframe/__screenshot"]
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56"

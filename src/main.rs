@@ -2,6 +2,8 @@
 
 mod doc;
 mod instance;
+#[cfg(windows)]
+mod register;
 mod source;
 mod theme;
 
@@ -307,13 +309,55 @@ fn files_from_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+/// Report to stderr, and in a dialog on Windows where release builds have no console.
+fn fail(msg: &str) -> ExitCode {
+    eprintln!("mdeer: {msg}");
+    #[cfg(windows)]
+    rfd::MessageDialog::new()
+        .set_title("MDeer")
+        .set_description(msg)
+        .set_level(rfd::MessageLevel::Error)
+        .show();
+    ExitCode::FAILURE
+}
+
+/// `--register` / `--unregister`; `None` if `flag` is not one of them.
+fn run_flag(flag: &str) -> Option<ExitCode> {
+    let result: std::io::Result<&str> = match flag {
+        #[cfg(windows)]
+        "--register" => register::register().map(|()| "MDeer is now registered for .md files."),
+        #[cfg(windows)]
+        "--unregister" => register::unregister().map(|()| "MDeer's .md registration was removed."),
+        "--register" | "--unregister" => Err(std::io::Error::other(
+            "file association is only supported on Windows",
+        )),
+        _ => return None,
+    };
+    Some(match result {
+        Ok(msg) => {
+            println!("{msg}");
+            #[cfg(windows)]
+            rfd::MessageDialog::new()
+                .set_title("MDeer")
+                .set_description(msg)
+                .show();
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e.to_string()),
+    })
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag] = args.as_slice()
+        && let Some(code) = run_flag(flag)
+    {
+        return code;
+    }
     let files = match files_from_args(&args) {
         Ok(files) => files,
         Err(e) => {
-            eprintln!("mdeer: {e}");
-            return ExitCode::FAILURE;
+            return fail(&e.to_string());
         }
     };
     // The running instance has another working directory.
@@ -335,8 +379,7 @@ fn main() -> ExitCode {
     };
     for file in &files {
         if let Err(e) = app.open(file) {
-            eprintln!("mdeer: {}: {e}", file.display());
-            return ExitCode::FAILURE;
+            return fail(&format!("{}: {e}", file.display()));
         }
     }
     app.active = 0;
@@ -362,10 +405,7 @@ fn main() -> ExitCode {
     );
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("mdeer: {e}");
-            ExitCode::FAILURE
-        }
+        Err(e) => fail(&e.to_string()),
     }
 }
 
