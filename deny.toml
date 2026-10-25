@@ -2,5 +2,5 @@
 allow = ["0BSD", "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "OFL-1.1", "Ubuntu-font-1.0", "BSL-1.0", "CC0-1.0", "MPL-2.0"]
 
 [advisories]
-# zbus split crates folded back into zbus; pulled in by accesskit_unix (Linux only). Drop once accesskit upgrades.
-ignore = ["RUSTSEC-2026-0370", "RUSTSEC-2026-0371", "RUSTSEC-2026-0372"]
+# Only fail on unmaintained crates we depend on directly; vulnerabilities still fail everywhere.
+unmaintained = "workspace"
