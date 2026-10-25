@@ -10,6 +10,8 @@ use egui_commonmark::{CommonMarkCache, CommonMarkScrollOptions, CommonMarkViewer
 use crate::{pressed, source};
 
 pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
+/// Above this, the reading view is virtualized and task checkboxes are read-only.
+const CHECKBOX_MAX_BYTES: usize = 200_000;
 
 /// What we last saw on disk, to notice writes by other programs.
 type Stamp = Option<(SystemTime, u64)>;
@@ -76,6 +78,9 @@ impl Doc {
 
     /// Scroll the reading view to the heading with this `{#anchor}`.
     pub fn scroll_to(&mut self, anchor: String) {
+        // `show_mut` has no viewer id, so it looks under `Id::NULL`.
+        self.cache
+            .scroll_to_heading(&egui::Id::NULL, Some(anchor.clone()));
         self.cache.scroll_to_heading(&self.id(), Some(anchor));
     }
 
@@ -153,17 +158,34 @@ impl Doc {
         }
     }
 
+    /// Small files get clickable task checkboxes; large ones the virtualized, read-only viewer.
+    // ponytail: egui_commonmark can't mutate and virtualize at once; drop the split when it can.
     pub fn reading_view(&mut self, ui: &mut egui::Ui) {
-        CommonMarkViewer::new()
+        let viewer = CommonMarkViewer::new()
             .default_implicit_uri_scheme(&self.image_base)
-            .enable_scroll_to_heading(true)
-            .show_scrollable(
+            .enable_scroll_to_heading(true);
+        if self.text.len() > CHECKBOX_MAX_BYTES {
+            viewer.show_scrollable(
                 self.id(),
                 ui,
                 &mut self.cache,
                 &CommonMarkScrollOptions::default().viewport_cache(true),
                 &self.text,
             );
+            return;
+        }
+        let changed = egui::ScrollArea::vertical()
+            .id_salt(self.id())
+            .show(ui, |ui| {
+                viewer
+                    .show_mut(ui, &mut self.cache, &mut self.text)
+                    .response
+                    .changed()
+            })
+            .inner;
+        if changed {
+            self.mark_edited();
+        }
     }
 
     pub fn source_view(&mut self, ui: &mut egui::Ui, focus: bool) {
