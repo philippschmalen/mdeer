@@ -28,6 +28,16 @@ pub fn file_url(path: &Path) -> String {
     format!("file://{slash}{path}")
 }
 
+const CODE_THEME: &str = "tokyo-night";
+
+fn markdown_cache() -> CommonMarkCache {
+    let mut cache = CommonMarkCache::default();
+    cache
+        .add_syntax_theme_from_bytes(CODE_THEME, include_bytes!("../assets/tokyo-night.tmTheme"))
+        .expect("bundled theme parses");
+    cache
+}
+
 pub struct Doc {
     pub path: PathBuf,
     pub text: String,
@@ -55,7 +65,7 @@ impl Doc {
             disk: stamp(&path),
             path,
             text,
-            cache: CommonMarkCache::default(),
+            cache: markdown_cache(),
             editing: false,
             highlight: Default::default(),
             edited_at: None,
@@ -162,6 +172,7 @@ impl Doc {
     // ponytail: egui_commonmark can't mutate and virtualize at once; drop the split when it can.
     pub fn reading_view(&mut self, ui: &mut egui::Ui) {
         let viewer = CommonMarkViewer::new()
+            .syntax_theme_dark(CODE_THEME)
             .default_implicit_uri_scheme(&self.image_base)
             .enable_scroll_to_heading(true);
         if self.text.len() > CHECKBOX_MAX_BYTES {
