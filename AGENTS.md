@@ -19,8 +19,8 @@
 - familiar shortcuts like obsidian
 - default view is rendered formatting like Obsidian
 - written in Rust
-- Linux-native (Ubuntu 24.04+); Windows 11 via WSL2/WSLg, see `docs/adr/0004-linux-only-windows-via-wsl.md`
-- `mdeer --register` integrates with the Linux desktop and, inside WSL, with Windows Explorer's "Open with"
+- native on Linux (Ubuntu 24.04+) and Windows 11 (unsigned exe via winget), see `docs/adr/0005-native-windows-unsigned-via-winget.md`
+- `mdeer --register` integrates with the Linux desktop or Windows Explorer's "Open with"
 - cli
 	- `mdeer <file>` opens a single file
 	- `mdeer` opens all `.md` files in the directory as tabs
@@ -35,7 +35,7 @@
 	- push your changes to remote
 	- merge to main
 - agents work in the beads **team-maintainer** profile: commit, push, merge to main, `bd dolt push` and release without asking (a current "don't" instruction still wins)
-- releases: bump `version` in `Cargo.toml` (semver), merge to main, then tag `vX.Y.Z` and push the tag; `release.yml` builds the Linux binary `mdeer-x86_64-linux` and publishes the GitHub Release. No permission needed to tag or push.
+- releases: bump `version` in `Cargo.toml` (semver), merge to main, then tag `vX.Y.Z` and push the tag; `release.yml` publishes `mdeer-x86_64-linux` and `mdeer-x86_64-windows.exe` to the GitHub Release and opens the winget-pkgs PR (needs the `WINGET_TOKEN` secret). No permission needed to tag or push.
 - prefer git worktrees to work in parallel
 - use determinist quality-gates where reasonable
 	- add reasonable pre-commit hooks based on modern Rust standards, tooling and conventions

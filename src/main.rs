@@ -1,6 +1,11 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+#[cfg(unix)]
 mod desktop;
 mod doc;
 mod instance;
+#[cfg(windows)]
+mod register;
 mod source;
 mod theme;
 
@@ -286,7 +291,10 @@ impl eframe::App for App {
 /// `mdeer <file>...` opens those files; bare `mdeer` opens every `.md` in the current directory.
 fn files_from_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     if !args.is_empty() {
+        #[cfg(unix)]
         let path = |a: &String| desktop::from_windows_path(a).unwrap_or_else(|| PathBuf::from(a));
+        #[cfg(windows)]
+        let path = PathBuf::from;
         return Ok(args.iter().map(path).collect());
     }
     let dir = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -318,21 +326,37 @@ fn window_icon() -> egui::IconData {
     }
 }
 
+/// Report to stderr, and in a dialog on Windows where release builds have no console.
 fn fail(msg: &str) -> ExitCode {
     eprintln!("mdeer: {msg}");
+    #[cfg(windows)]
+    rfd::MessageDialog::new()
+        .set_title("MDeer")
+        .set_description(msg)
+        .set_level(rfd::MessageLevel::Error)
+        .show();
     ExitCode::FAILURE
 }
 
 /// `--register` / `--unregister`; `None` if `flag` is not one of them.
 fn run_flag(flag: &str) -> Option<ExitCode> {
+    #[cfg(unix)]
+    use desktop as platform;
+    #[cfg(windows)]
+    use register as platform;
     let result = match flag {
-        "--register" => desktop::register(),
-        "--unregister" => desktop::unregister(),
+        "--register" => platform::register(),
+        "--unregister" => platform::unregister(),
         _ => return None,
     };
     Some(match result {
         Ok(log) => {
             log.iter().for_each(|line| println!("{line}"));
+            #[cfg(windows)]
+            rfd::MessageDialog::new()
+                .set_title("MDeer")
+                .set_description(log.join("\n"))
+                .show();
             ExitCode::SUCCESS
         }
         Err(e) => fail(&e.to_string()),
@@ -342,6 +366,7 @@ fn run_flag(flag: &str) -> Option<ExitCode> {
 /// WSLg has no DRM render node: Mesa probes for one, tries Zink, and only then
 /// falls back, printing warnings at each step. Pin its native D3D12 driver and
 /// mute EGL's probe noise. Re-exec because `set_var` is unsafe.
+#[cfg(unix)]
 fn wslg_gl() {
     use std::os::unix::process::CommandExt;
     if std::env::var_os("GALLIUM_DRIVER").is_some()
@@ -382,6 +407,7 @@ fn main() -> ExitCode {
     if instance::forward(&socket, &files) {
         return ExitCode::SUCCESS;
     }
+    #[cfg(unix)]
     wslg_gl();
     let listener = instance::bind(&socket);
 

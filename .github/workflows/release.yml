@@ -18,3 +18,26 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" mdeer-x86_64-linux --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  windows:
+    needs: linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - run: cp target/release/mdeer.exe mdeer-x86_64-windows.exe
+      - run: gh release upload "$env:GITHUB_REF_NAME" mdeer-x86_64-windows.exe
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Updates the PhilippSchmalen.MDeer manifest; the first version was submitted by hand with wingetcreate.
+  winget:
+    needs: windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: PhilippSchmalen.MDeer
+          installers-regex: 'mdeer-x86_64-windows\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
