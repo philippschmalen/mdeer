@@ -35,10 +35,14 @@ mdeer --unregister    # undo --register
 |---|---|
 | `Ctrl+E` | Toggle reading / source view |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link (source view) |
+| `Enter` / `Shift+Enter` | Continue list or quote (Enter on an empty item ends it) / plain newline |
+| `Tab` / `Shift+Tab` | Indent / outdent list item |
 | `Ctrl+O` | Open file in a new tab |
 | `Ctrl+W` | Close tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
+
+In source view, `(` `[` `{` `"` and backticks auto-close, and typing over a selection with these or `*` `_` `~` `=` wraps the selection. Typing three backticks at the start of a line adds the closing fence.
 
 To uninstall: `mdeer --unregister && rm ~/.local/bin/mdeer`.
 

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use eframe::egui::{self, Key};
+use eframe::egui::{self, Event, Key, Modifiers};
 use egui::text::{CCursor, CCursorRange, LayoutJob};
 use egui_commonmark::{CommonMarkCache, CommonMarkScrollOptions, CommonMarkViewer};
 
@@ -210,6 +210,7 @@ impl Doc {
                 self.format_selection(ui.ctx(), id, before, after);
             }
         }
+        self.typing_helpers(ui, id);
 
         let font = egui::TextStyle::Monospace.resolve(ui.style());
         let cache = &mut self.highlight;
@@ -239,6 +240,92 @@ impl Doc {
             })
             .inner;
         if changed {
+            self.mark_edited();
+        }
+    }
+
+    /// Obsidian-style list continuation and auto-pairing: handles the keystroke events
+    /// `source::edit` claims and removes them before the `TextEdit` sees them.
+    fn typing_helpers(&mut self, ui: &egui::Ui, id: egui::Id) {
+        if !ui.memory(|m| m.has_focus(id)) {
+            return;
+        }
+        let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) else {
+            return;
+        };
+        let Some(range) = state.cursor.char_range() else {
+            return;
+        };
+        let sorted = range.as_sorted_char_range();
+        let mut sel = sorted.start.0..sorted.end.0;
+        let mut changed = false;
+        // ponytail: stop at the first edit we leave to the TextEdit so events keep their
+        // order; a helper may be skipped when several keystrokes land in one frame.
+        let mut stop = false;
+        ui.input_mut(|i| {
+            i.events.retain(|event| {
+                if stop {
+                    return true;
+                }
+                let input = match event {
+                    Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => match (key, *modifiers) {
+                        (Key::Enter, Modifiers::NONE) => source::Input::Enter,
+                        (Key::Backspace, Modifiers::NONE) => source::Input::Backspace,
+                        (Key::Tab, Modifiers::NONE) => source::Input::Indent,
+                        (Key::Tab, Modifiers::SHIFT) => source::Input::Outdent,
+                        (
+                            Key::Enter
+                            | Key::Backspace
+                            | Key::Tab
+                            | Key::Delete
+                            | Key::Home
+                            | Key::End
+                            | Key::PageUp
+                            | Key::PageDown
+                            | Key::ArrowLeft
+                            | Key::ArrowRight
+                            | Key::ArrowUp
+                            | Key::ArrowDown,
+                            _,
+                        ) => {
+                            stop = true;
+                            return true;
+                        }
+                        _ => {
+                            stop |= modifiers.command;
+                            return true;
+                        }
+                    },
+                    Event::Text(t) if t.chars().count() == 1 => {
+                        source::Input::Char(t.chars().next().unwrap_or_default())
+                    }
+                    Event::Text(_) | Event::Paste(_) | Event::Cut => {
+                        stop = true;
+                        return true;
+                    }
+                    _ => return true,
+                };
+                match source::edit(&mut self.text, sel.clone(), input) {
+                    Some(new) => {
+                        (sel, changed) = (new, true);
+                        false
+                    }
+                    None => {
+                        stop = true;
+                        true
+                    }
+                }
+            });
+        });
+        if changed {
+            let (a, b) = (CCursor::new(sel.start), CCursor::new(sel.end));
+            state.cursor.set_char_range(Some(CCursorRange::two(a, b)));
+            state.store(ui.ctx(), id);
             self.mark_edited();
         }
     }
@@ -280,6 +367,34 @@ mod tests {
     /// even on filesystems with coarse mtimes).
     fn external_write(doc: &Doc, text: &str) {
         std::fs::write(&doc.path, text).unwrap();
+    }
+
+    #[test]
+    fn typing_helpers_reach_the_editor() {
+        let mut doc = temp_doc("typing", "- a");
+        let ctx = egui::Context::default();
+        let key = |key| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [
+            vec![],
+            vec![key(Key::End)],
+            vec![key(Key::Enter), Event::Text("(".into())],
+            vec![Event::Text("b".into())],
+        ] {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| doc.source_view(ui, true))
+                .textures_delta
+                .clear();
+        }
+        assert_eq!(doc.text, "- a\n- (b)");
     }
 
     #[test]
