@@ -1,0 +1,3 @@
+[default.extend-words]
+# Mesa's OpenGL-on-Vulkan driver
+Zink = "Zink"
