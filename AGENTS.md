@@ -1,5 +1,7 @@
 # MDeer - Lightweight markdown reader and editor
 
+> Vision: Like notepad just for markdown
+
 ## Objective goals
 
 - app startup time <= 1 second
@@ -13,7 +15,6 @@
 	- autosave changes
 	- when closed, do not remember opened files
 	- assets: render images, resolve relative links
-- like notepad just for markdown
 - tokyo night theme
 - familiar shortcuts like obsidian
 - default view is rendered formatting like Obsidian
