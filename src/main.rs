@@ -338,8 +338,13 @@ fn fail(msg: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// `--register` / `--unregister`; `None` if `flag` is not one of them.
+/// `--version` / `--register` / `--unregister`; `None` if `flag` is not one of them.
 fn run_flag(flag: &str) -> Option<ExitCode> {
+    // No window or dialog: winget's validation runs this to check the exe starts.
+    if flag == "--version" {
+        println!("mdeer {}", env!("CARGO_PKG_VERSION"));
+        return Some(ExitCode::SUCCESS);
+    }
     #[cfg(unix)]
     use desktop as platform;
     #[cfg(windows)]

@@ -38,6 +38,7 @@ mdeer a.md b.md       # open several as tabs
 mdeer                 # open every .md in the current folder as tabs
 mdeer --register      # make MDeer the default app for .md (Linux desktop entry / Windows Explorer)
 mdeer --unregister    # undo --register
+mdeer --version       # print the version
 ```
 
 | Shortcut | Action |
