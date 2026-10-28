@@ -19,6 +19,7 @@ enum Kind {
     Link,
     Quote,
     Muted,
+    Conflict,
 }
 
 pub fn options() -> Options {
@@ -45,6 +46,26 @@ fn classify(text: &str) -> Vec<Kind> {
             _ => {}
         }
     }
+    let mut offset = 0;
+    let mut conflict = None;
+    for line in text.split_inclusive('\n') {
+        let label = line.trim_end_matches(['\r', '\n']);
+        let ours = label.trim_start_matches('<');
+        let theirs = label.trim_start_matches('>');
+        let marker = if label.len() - ours.len() >= 7 && ours == " MDeer: yours" {
+            conflict = Some(label.len() - ours.len());
+            true
+        } else if label.len() - theirs.len() >= 7 && theirs == " MDeer: external" {
+            conflict = None;
+            true
+        } else {
+            conflict == Some(label.len()) && label.bytes().all(|b| b == b'=')
+        };
+        if marker {
+            paint(offset..offset + line.len(), Kind::Conflict);
+        }
+        offset += line.len();
+    }
     kinds
 }
 
@@ -60,6 +81,7 @@ fn format(kind: Kind, font_id: &FontId) -> TextFormat {
         Kind::Link => f.color = theme::CYAN,
         Kind::Quote => (f.color, f.italics) = (theme::COMMENT, true),
         Kind::Muted => f.color = theme::COMMENT,
+        Kind::Conflict => f.color = theme::YELLOW,
     }
     f
 }
@@ -348,6 +370,34 @@ mod tests {
         let text = "a *é* `c` [l](u)\n\n> q\n";
         let job = highlight(text, &FontId::monospace(12.0));
         assert_eq!(job.text, text);
+    }
+
+    #[test]
+    fn mdeer_labels_and_only_their_matching_separator_are_highlighted() {
+        let text = concat!(
+            "<<<<<<<< MDeer: yours\r\né\n=======\n",
+            "========\ndisk\n>>>>>>>> MDeer: external\n",
+            "ordinary\n=======\n"
+        );
+        let kinds = classify(text);
+        for line in [
+            "<<<<<<<< MDeer: yours",
+            "========",
+            ">>>>>>>> MDeer: external",
+        ] {
+            let start = text.find(line).unwrap();
+            assert!(
+                kinds[start..start + line.len()]
+                    .iter()
+                    .all(|&k| k == Kind::Conflict)
+            );
+        }
+        for start in text.match_indices("=======\n").map(|(i, _)| i) {
+            if text.as_bytes().get(start.wrapping_sub(1)) != Some(&b'=') {
+                assert!(kinds[start..start + 7].iter().all(|&k| k != Kind::Conflict));
+            }
+        }
+        assert_eq!(highlight(text, &FontId::monospace(12.0)).text, text);
     }
 
     #[test]

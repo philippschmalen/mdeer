@@ -54,6 +54,14 @@ mdeer --version       # print the version
 
 In source view, `(` `[` `{` `"` and backticks auto-close, and typing over a selection with these or `*` `_` `~` `=` wraps the selection. Typing three backticks at the start of a line adds the closing fence.
 
+### External changes and closing
+
+When an external change is detected, MDeer reloads an unedited file or merges it with your unsaved edits. Non-overlapping changes combine automatically. Overlapping changes become labelled Git-style conflict markers, autosaved into the `.md` file without extra backup copies.
+
+Conflicted files show Source view, including when reopened. Resolve each region with **Keep mine**, **Use disk**, or **Keep both**, or edit the markers manually. Keep both retains both alternatives and removes that region's markers. Further merging pauses if you have unsaved unresolved conflicts and the disk file changes again.
+
+Successfully saved markers do not prevent closing. If saving fails, the note stays open; a failed Window close keeps all Tabs open. Retry, cancel closing, or explicitly confirm discarding unsaved edits. This is not crash recovery and cannot prevent another editor from subsequently overwriting the file.
+
 To uninstall: `mdeer --unregister`, then `rm ~/.local/bin/mdeer` on Linux or `winget uninstall PhilippSchmalen.MDeer` on Windows.
 
 ## Build from source
