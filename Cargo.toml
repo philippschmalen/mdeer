@@ -1,9 +1,15 @@
 [package]
 description = "Lightweight markdown reader and editor"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 name = "mdeer"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
+repository = "https://github.com/philippschmalen/mdeer"
+homepage = "https://github.com/philippschmalen/mdeer"
+readme = "README.md"
+keywords = ["markdown", "editor", "viewer", "notepad", "egui"]
+categories = ["text-editors", "gui"]
+include = ["/src", "/assets", "/build.rs", "/LICENSE-*", "/THIRD_PARTY_LICENSES.md", "/README.md"]
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "links", "clipboard", "wayland", "x11", "accesskit"] }

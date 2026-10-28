@@ -15,9 +15,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked
       - run: cp target/release/mdeer mdeer-x86_64-linux
-      - run: gh release create "$GITHUB_REF_NAME" mdeer-x86_64-linux --generate-notes
+      - run: gh release create "$GITHUB_REF_NAME" mdeer-x86_64-linux THIRD_PARTY_LICENSES.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  crates:
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   windows:
     needs: linux
@@ -36,7 +46,7 @@ jobs:
     needs: windows
     runs-on: ubuntu-latest
     steps:
-      - uses: vedantmgoyal9/winget-releaser@main
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main, 2026-10-28
         with:
           identifier: PhilippSchmalen.MDeer
           installers-regex: 'mdeer-x86_64-windows\.exe$'

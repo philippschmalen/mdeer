@@ -59,7 +59,7 @@ To uninstall: `mdeer --unregister`, then `rm ~/.local/bin/mdeer` on Linux or `wi
 ## Build from source
 
 ```sh
-cargo install --git https://github.com/philippschmalen/mdeer
+cargo install mdeer
 ```
 
 ## Development
@@ -71,4 +71,10 @@ cargo install --git https://github.com/philippschmalen/mdeer
 
 ## License
 
-[MIT](LICENSE)
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option. Bundled third-party code, fonts and themes are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in MDeer by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+MDeer has no telemetry and makes no network requests.
+
+Notepad is a trademark of Microsoft Corporation; Obsidian is a trademark of Dynalist Inc. MDeer is not affiliated with either.
