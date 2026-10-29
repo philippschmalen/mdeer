@@ -2,6 +2,6 @@
 
 Supersedes [0004](0004-linux-only-windows-via-wsl.md). WSLg has no real window management (no Snap, no proper Alt-Tab or taskbar), so MDeer ships a native `mdeer.exe` again next to the Linux binary.
 
-An unsigned exe downloaded in a browser carries the Mark of the Web, and Microsoft Defender SmartScreen shows an "Unknown publisher" prompt before it runs. winget is the supported install route instead (`PhilippSchmalen.MDeer`, portable): its packages are validated and scanned by Microsoft before they are listed. A release job opens the winget-pkgs PR for each tag.
+winget is the Windows install route (`PhilippSchmalen.MDeer`, portable). Microsoft validates and scans its packages before listing them. A release job opens the winget-pkgs PR for each tag.
 
-We won't pay for a signing certificate; it mainly helps SmartScreen on browser downloads. Free signing through SignPath Foundation (publisher shown as "SignPath Foundation") stays an option if browser downloads matter later. If Explorer launches of a winget-installed copy still show the prompt, the README documents a one-time `Unblock-File` rather than having MDeer strip its own mark.
+The exe is unsigned; we won't pay for a certificate. Windows judges an unsigned exe by its reputation, and every release is a new, unknown file. SmartScreen warns about browser downloads. Where Defender's attack surface reduction rule "Block executable files from running unless they meet a prevalence, age, or trusted list criterion" is on, the exe is blocked however it was installed. Signing is not a documented way past that rule. On such devices an administrator has to allow MDeer, or people keep using the WSL route from 0004, which still works. Free signing through SignPath Foundation stays an option.

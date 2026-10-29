@@ -18,7 +18,7 @@ winget install PhilippSchmalen.MDeer
 mdeer --register
 ```
 
-`--register` adds MDeer to Explorer's **Open with** for `.md` files, and makes it the default if no other app is set. No admin rights are needed. The exe is unsigned: a copy downloaded in a browser gets SmartScreen's "Unknown publisher" warning, so install it with winget.
+`--register` adds MDeer to Explorer's **Open with** for `.md` files, and makes it the default if no other app is set. No admin rights are needed. The exe is unsigned, so Windows may warn about or block a new release until it builds a reputation. On a work machine, ask your IT department to allow it, or use the WSL2 route below.
 
 **Ubuntu 24.04+:**
 
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/philippschmalen/mdeer/main/install.
 
 This installs `mdeer` to `~/.local/bin` and makes it the default app for markdown. No sudo is needed. Then run `mdeer notes.md`.
 
-**WSL2 (the older Windows route):** run the same installer inside an Ubuntu 24.04+ WSL2 distro. It also adds MDeer to Explorer's **Open with** menu for `.md` files. To make it the default, right-click a `.md` file → **Open with** → **Choose another app** → **MDeer** → **Always**. Files on `C:\` and inside WSL (`\\wsl.localhost\...`) both work. MDeer runs inside WSL and shows its window through WSLg; Windows only starts `wsl.exe`, so no unsigned `.exe` is involved.
+**WSL2 (the older Windows route):** run the same installer inside an Ubuntu 24.04+ WSL2 distro. It also adds MDeer to Explorer's **Open with** menu for `.md` files. To make it the default, right-click a `.md` file → **Open with** → **Choose another app** → **MDeer** → **Always**. Files on `C:\` and inside WSL (`\\wsl.localhost\...`) both work. MDeer runs inside WSL and shows its window through WSLg.
 
 ## Usage
 

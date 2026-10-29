@@ -3,8 +3,7 @@
 //! - Linux: a `.desktop` entry and icon under `~/.local/share`, made the default app
 //!   for markdown with `xdg-mime`.
 //! - Inside WSL: additionally MDeer under Explorer's "Open with" for `.md`, starting it
-//!   through `wsl.exe` under a headless `conhost.exe` (no console window); the user picks "Always" once. Only Microsoft-signed Windows
-//!   binaries run, so policies that block unsigned exes don't apply.
+//!   through `wsl.exe` under a headless `conhost.exe` (no console window); the user picks "Always" once.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -14,8 +13,8 @@ const DESKTOP_FILE: &str = "mdeer.desktop";
 const MIME_TYPES: [&str; 2] = ["text/markdown", "text/x-markdown"];
 const PROG_ID: &str = "MDeer.md";
 const EXTENSIONS: [&str; 2] = [".md", ".markdown"];
-/// `wslg.exe` would be the natural launcher, but managed machines may block it
-/// (it exits with -1); these two System32 binaries are always allowed.
+/// `wslg.exe` would be the natural launcher, but it exited with -1 in our tests;
+/// these two System32 binaries are always present.
 const CONHOST: &str = "/mnt/c/Windows/System32/conhost.exe";
 const WSL: &str = "/mnt/c/Windows/System32/wsl.exe";
 
