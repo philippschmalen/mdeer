@@ -2,7 +2,7 @@
 description = "Lightweight markdown reader and editor"
 license = "MIT OR Apache-2.0"
 name = "mdeer"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 repository = "https://github.com/philippschmalen/mdeer"
 homepage = "https://github.com/philippschmalen/mdeer"
