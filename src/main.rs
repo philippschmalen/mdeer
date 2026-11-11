@@ -23,6 +23,8 @@ struct App {
     /// Files forwarded by later `mdeer` invocations.
     inbox: Option<Receiver<PathBuf>>,
     pending_close: Option<PendingClose>,
+    /// Last zoom factor written to `zoom_file()`.
+    saved_zoom: f32,
 }
 
 enum CloseTarget {
@@ -46,6 +48,37 @@ fn pressed(ui: &egui::Ui, key: Key) -> bool {
 
 fn pressed_with(ui: &egui::Ui, modifiers: Modifiers, key: Key) -> bool {
     ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
+}
+
+const DEFAULT_ZOOM: f32 = 1.4;
+
+/// The only setting MDeer remembers between runs.
+fn zoom_file() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let dir = PathBuf::from(std::env::var_os("APPDATA")?);
+    #[cfg(not(windows))]
+    let dir = match std::env::var_os("XDG_CONFIG_HOME") {
+        Some(d) => PathBuf::from(d),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
+    };
+    Some(dir.join("mdeer").join("zoom"))
+}
+
+/// egui clamps zoom to 0.2..=5.0; anything else (or garbage) falls back to the default.
+fn parse_zoom(s: &str) -> f32 {
+    s.trim()
+        .parse()
+        .ok()
+        .filter(|z| (0.2..=5.0).contains(z))
+        .unwrap_or(DEFAULT_ZOOM)
+}
+
+fn load_zoom() -> f32 {
+    parse_zoom(
+        &zoom_file()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default(),
+    )
 }
 
 fn is_markdown(path: &Path) -> bool {
@@ -406,10 +439,29 @@ impl App {
     }
 }
 
+impl App {
+    /// Ctrl+0 resets to our default (egui's own reset, run later in `end_pass`, would pick 1.0),
+    /// and any zoom change is written straight away; write errors are ignored.
+    fn persist_zoom(&mut self, ui: &egui::Ui) {
+        if pressed(ui, Key::Num0) {
+            ui.ctx().set_zoom_factor(DEFAULT_ZOOM);
+        }
+        let zoom = ui.ctx().zoom_factor();
+        if zoom != self.saved_zoom {
+            self.saved_zoom = zoom;
+            if let Some(path) = zoom_file() {
+                let _ = path.parent().map(std::fs::create_dir_all);
+                let _ = std::fs::write(path, zoom.to_string());
+            }
+        }
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.receive_forwarded(ui.ctx());
         self.viewport_close(ui.ctx());
+        self.persist_zoom(ui);
         if self.docs.is_empty() {
             return;
         }
@@ -601,6 +653,7 @@ fn main() -> ExitCode {
         title: String::new(),
         inbox: None,
         pending_close: None,
+        saved_zoom: load_zoom(),
     };
     for file in &files {
         if let Err(e) = app.open(file) {
@@ -623,8 +676,8 @@ fn main() -> ExitCode {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
-            // egui's 12.5pt body text is tiny at 1x; Ctrl +/- still adjusts from here.
-            cc.egui_ctx.set_zoom_factor(1.8);
+            // egui's 12.5pt body text is tiny at 1x; Ctrl +/- adjusts and is remembered.
+            cc.egui_ctx.set_zoom_factor(app.saved_zoom);
             egui_extras::install_image_loaders(&cc.egui_ctx);
             let ctx = cc.egui_ctx.clone();
             app.inbox = listener.map(|l| instance::serve(l, move || ctx.request_repaint()));
@@ -640,6 +693,15 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_zoom_accepts_egui_range_and_falls_back_otherwise() {
+        assert_eq!(parse_zoom("1.6"), 1.6);
+        assert_eq!(parse_zoom(" 2.0\n"), 2.0);
+        for bad in ["", "abc", "NaN", "9", "0.1"] {
+            assert_eq!(parse_zoom(bad), DEFAULT_ZOOM, "{bad:?}");
+        }
+    }
 
     struct TestFiles(PathBuf);
 
@@ -671,6 +733,7 @@ mod tests {
                 title: String::new(),
                 inbox: None,
                 pending_close: None,
+                saved_zoom: DEFAULT_ZOOM,
             },
             TestFiles(dir),
         )
