@@ -43,6 +43,7 @@ mdeer --version       # print the version
 
 | Shortcut | Action |
 |---|---|
+| `Ctrl+P` | Command palette: every command and its shortcut |
 | `Ctrl+E` | Toggle reading / source view |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` | Bold / italic / link (source view) |
 | `Enter` / `Shift+Enter` | Continue list or quote (Enter on an empty item ends it) / plain newline |
@@ -51,6 +52,22 @@ mdeer --version       # print the version
 | `Ctrl+W` | Close tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
+
+### Tables
+
+In source view, the cursor in a table changes what keys do. Only the table you work on is reformatted (pipes aligned, missing cells filled); every action is one `Ctrl+Z`.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+P` → **Insert table…** | Insert an empty table; type a size like `4x3` (columns x rows) |
+| `Tab` / `Shift+Tab` | Next / previous cell (`Tab` on the last cell adds a row) |
+| `Enter` | Same column, next row (adds one at the end; on an empty last row, leaves the table) |
+| `Alt+Shift+↓` / `↑` | Insert row below / above |
+| `Alt+Shift+→` / `←` | Insert column right / left |
+| `Alt+↑` / `↓` / `←` / `→` | Move row / column |
+| `Ctrl+Shift+Backspace` / `Ctrl+Shift+Delete` | Delete row / column |
+
+Alignment comes from the colons in the separator row (`:--`, `:-:`, `--:`). Pasting cells copied from a spreadsheet inserts them as a table; `Ctrl+Z` right after turns it back into the pasted text.
 
 In source view, `(` `[` `{` `"` and backticks auto-close, and typing over a selection with these or `*` `_` `~` `=` wraps the selection. Typing three backticks at the start of a line adds the closing fence.
 
