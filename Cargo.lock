@@ -1847,6 +1847,7 @@ dependencies = [
  "interprocess",
  "pulldown-cmark",
  "rfd",
+ "unicode-width",
  "winreg",
  "winresource",
 ]

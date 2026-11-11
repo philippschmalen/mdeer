@@ -4,9 +4,11 @@
 mod desktop;
 mod doc;
 mod instance;
+mod palette;
 #[cfg(windows)]
 mod register;
 mod source;
+mod table;
 mod theme;
 
 use std::path::{Path, PathBuf};
@@ -15,6 +17,7 @@ use std::sync::mpsc::Receiver;
 
 use doc::Doc;
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, OutputCommand, ViewportCommand};
+use palette::{Command, Outcome, Palette, Scope};
 
 struct App {
     docs: Vec<Doc>,
@@ -25,6 +28,9 @@ struct App {
     pending_close: Option<PendingClose>,
     /// Last zoom factor written to `zoom_file()`.
     saved_zoom: f32,
+    palette: Option<Palette>,
+    /// Give the Source editor keyboard focus this frame.
+    focus_editor: bool,
 }
 
 enum CloseTarget {
@@ -40,20 +46,24 @@ struct PendingClose {
     discarded: Vec<(PathBuf, String)>,
 }
 
-const CTRL: Modifiers = Modifiers::COMMAND;
-
-fn pressed(ui: &egui::Ui, key: Key) -> bool {
-    pressed_with(ui, CTRL, key)
-}
-
-fn pressed_with(ui: &egui::Ui, modifiers: Modifiers, key: Key) -> bool {
-    ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
+/// Whether `shortcut` was pressed this frame, without consuming it.
+fn pressed(ui: &egui::Ui, shortcut: &KeyboardShortcut) -> bool {
+    ui.input(|i| {
+        i.events.iter().any(|e| {
+            matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. }
+                if *key == shortcut.logical_key && modifiers.matches_logically(shortcut.modifiers))
+        })
+    })
 }
 
 const DEFAULT_ZOOM: f32 = 1.4;
 
 /// The only setting MDeer remembers between runs.
 fn zoom_file() -> Option<PathBuf> {
+    // Tests drive `App::show`; they must never write the user's settings.
+    if cfg!(test) {
+        return None;
+    }
     #[cfg(windows)]
     let dir = PathBuf::from(std::env::var_os("APPDATA")?);
     #[cfg(not(windows))]
@@ -221,22 +231,88 @@ impl App {
         }
     }
 
+    /// Runs the commands whose shortcut was pressed and that can run now.
     fn shortcuts(&mut self, ui: &egui::Ui) {
-        if pressed(ui, Key::O) {
-            self.open_dialog();
-        }
-        if pressed(ui, Key::W) {
-            self.close_active(ui.ctx());
-        }
-        let n = self.docs.len();
-        if n == 0 {
+        if self.palette.is_some() {
             return;
         }
-        // Shift first: consume_shortcut ignores extra Shift when matching Ctrl+Tab.
-        if pressed_with(ui, CTRL | Modifiers::SHIFT, Key::Tab) {
-            self.active = (self.active + n - 1) % n;
-        } else if pressed(ui, Key::Tab) {
-            self.active = (self.active + 1) % n;
+        for &cmd in Command::ALL {
+            let Some(shortcut) = cmd.shortcut() else {
+                continue;
+            };
+            if cmd.handled_by_egui() || !pressed(ui, &shortcut) || !self.can_run(ui.ctx(), cmd) {
+                continue;
+            }
+            ui.input_mut(|i| i.consume_shortcut(&shortcut));
+            self.run(cmd, ui.ctx());
+        }
+    }
+
+    fn can_run(&self, ctx: &egui::Context, cmd: Command) -> bool {
+        let Some(doc) = self.docs.get(self.active) else {
+            return cmd == Command::Open;
+        };
+        match cmd.scope() {
+            Scope::Always => true,
+            Scope::Source => doc.editing,
+            Scope::Table => doc.editing && doc.cursor_in_table(ctx),
+        }
+    }
+
+    fn run(&mut self, cmd: Command, ctx: &egui::Context) {
+        let n = self.docs.len();
+        match cmd {
+            Command::Palette => {
+                let available = Command::ALL
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.can_run(ctx, c))
+                    .collect();
+                self.palette = Some(Palette::new(available));
+            }
+            Command::Open => self.open_dialog(),
+            Command::CloseTab => self.close_active(ctx),
+            Command::PrevTab if n > 0 => self.active = (self.active + n - 1) % n,
+            Command::NextTab if n > 0 => self.active = (self.active + 1) % n,
+            Command::ZoomIn => egui::gui_zoom::zoom_in(ctx),
+            Command::ZoomOut => egui::gui_zoom::zoom_out(ctx),
+            Command::ZoomReset => ctx.set_zoom_factor(DEFAULT_ZOOM),
+            _ => {}
+        }
+        let Some(doc) = self.docs.get_mut(self.active) else {
+            return;
+        };
+        match cmd {
+            Command::ToggleView => {
+                doc.toggle_editing();
+                self.focus_editor = doc.editing;
+            }
+            Command::Bold => doc.format_selection(ctx, "**", "**"),
+            Command::Italic => doc.format_selection(ctx, "*", "*"),
+            Command::Link => doc.format_selection(ctx, "[", "]()"),
+            Command::Table(op) => doc.run_table(ctx, op),
+            _ => {}
+        }
+    }
+
+    fn palette(&mut self, ctx: &egui::Context) {
+        let Some(palette) = &mut self.palette else {
+            return;
+        };
+        let outcome = palette.show(ctx);
+        if matches!(outcome, Outcome::Open) {
+            return;
+        }
+        self.palette = None;
+        self.focus_editor = self.docs.get(self.active).is_some_and(|d| d.editing);
+        match outcome {
+            Outcome::Run(cmd) => self.run(cmd, ctx),
+            Outcome::InsertTable(cols, rows) => {
+                if let Some(doc) = self.docs.get_mut(self.active) {
+                    doc.insert_table(ctx, cols, rows);
+                }
+            }
+            Outcome::Open | Outcome::Close => {}
         }
     }
 
@@ -443,7 +519,9 @@ impl App {
     /// Ctrl+0 resets to our default (egui's own reset, run later in `end_pass`, would pick 1.0),
     /// and any zoom change is written straight away; write errors are ignored.
     fn persist_zoom(&mut self, ui: &egui::Ui) {
-        if pressed(ui, Key::Num0) {
+        if ui.input_mut(|i| {
+            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0))
+        }) {
             ui.ctx().set_zoom_factor(DEFAULT_ZOOM);
         }
         let zoom = ui.ctx().zoom_factor();
@@ -459,6 +537,12 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.show(ui);
+    }
+}
+
+impl App {
+    fn show(&mut self, ui: &mut egui::Ui) {
         self.receive_forwarded(ui.ctx());
         self.viewport_close(ui.ctx());
         self.persist_zoom(ui);
@@ -490,10 +574,7 @@ impl eframe::App for App {
         if self.docs.is_empty() {
             return;
         }
-        let toggled = pressed(ui, Key::E);
-        if toggled {
-            self.docs[self.active].toggle_editing();
-        }
+        self.palette(ui.ctx());
         self.tab_bar(ui);
         self.close_banner(ui);
         if self.docs.is_empty() {
@@ -501,9 +582,10 @@ impl eframe::App for App {
         }
         self.banner(ui);
         let doc = &mut self.docs[self.active];
+        let focus = std::mem::take(&mut self.focus_editor) && self.palette.is_none();
         egui::CentralPanel::default().show(ui, |ui| {
             if doc.editing {
-                doc.source_view(ui, toggled);
+                doc.source_view(ui, focus);
             } else {
                 doc.reading_view(ui);
             }
@@ -654,6 +736,8 @@ fn main() -> ExitCode {
         inbox: None,
         pending_close: None,
         saved_zoom: load_zoom(),
+        palette: None,
+        focus_editor: false,
     };
     for file in &files {
         if let Err(e) = app.open(file) {
@@ -693,6 +777,8 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CTRL: Modifiers = Modifiers::COMMAND;
 
     #[test]
     fn parse_zoom_accepts_egui_range_and_falls_back_otherwise() {
@@ -734,6 +820,8 @@ mod tests {
                 inbox: None,
                 pending_close: None,
                 saved_zoom: DEFAULT_ZOOM,
+                palette: None,
+                focus_editor: false,
             },
             TestFiles(dir),
         )
@@ -1034,6 +1122,155 @@ mod tests {
         assert_eq!(app.docs[0].text, "keep editing");
         assert!(app.docs[0].edited_at.is_some());
         assert_eq!(app.docs.len(), 1);
+    }
+
+    fn press(modifiers: Modifiers, key: Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn frame(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| app.show(ui)).textures_delta.clear();
+    }
+
+    const TABLE: &str = "| a | b |\n|---|---|\n| c | d |\n| e | f |\n";
+
+    /// An app in Source view with the cursor after the first `after` and its char position.
+    fn source_app(name: &str, text: &str, after: &str) -> (App, TestFiles, egui::Context, usize) {
+        let (mut app, files) = app_fixture(name, &[text]);
+        app.docs[0].editing = true;
+        app.focus_editor = true;
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, vec![]);
+        let at = text[..text.find(after).unwrap() + after.len()]
+            .chars()
+            .count();
+        let id = app.docs[0].source_id();
+        let mut state = egui::TextEdit::load_state(&ctx, id).unwrap();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(at),
+            )));
+        state.store(&ctx, id);
+        (app, files, ctx, at)
+    }
+
+    #[test]
+    fn every_table_shortcut_matches_its_command_and_undoes_in_one_step() {
+        for &cmd in Command::ALL {
+            let (Command::Table(op), Some(shortcut)) = (cmd, cmd.shortcut()) else {
+                continue;
+            };
+            let (mut app, _files, ctx, at) = source_app("table-shortcut", TABLE, "| c");
+            let mut expected = TABLE.to_owned();
+            table::apply(&mut expected, at..at, op).unwrap();
+            frame(
+                &mut app,
+                &ctx,
+                vec![press(shortcut.modifiers, shortcut.logical_key)],
+            );
+            assert_eq!(app.docs[0].text, expected, "{cmd:?}");
+            frame(&mut app, &ctx, vec![press(Modifiers::COMMAND, Key::Z)]);
+            assert_eq!(app.docs[0].text, TABLE, "{cmd:?} undo");
+        }
+    }
+
+    #[test]
+    fn alt_shift_down_inserts_a_row_instead_of_moving_it() {
+        let (mut app, _files, ctx, _) = source_app("alt-shift", TABLE, "| c");
+        frame(
+            &mut app,
+            &ctx,
+            vec![press(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowDown)],
+        );
+        assert!(
+            app.docs[0]
+                .text
+                .contains("| c   | d   |\n|     |     |\n| e")
+        );
+    }
+
+    #[test]
+    fn table_shortcuts_outside_tables_are_left_to_the_editor() {
+        let (mut app, _files, ctx, _) = source_app("outside", "plain words", "plain");
+        assert!(!app.can_run(&ctx, Command::Table(table::Op::DeleteRow)));
+        let mut left = 0;
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![press(CTRL | Modifiers::SHIFT, Key::Backspace)],
+                ..Default::default()
+            },
+            |ui| {
+                app.shortcuts(ui);
+                left = ui.input(|i| i.events.len());
+            },
+        )
+        .textures_delta
+        .clear();
+        assert_eq!(left, 1);
+        app.docs[0].editing = false;
+        assert!(!app.can_run(&ctx, Command::InsertTable));
+    }
+
+    #[test]
+    fn palette_runs_table_commands_and_inserts_a_sized_table() {
+        let (mut app, _files, ctx, at) = source_app("palette", TABLE, "| c");
+        frame(&mut app, &ctx, vec![press(CTRL, Key::P)]);
+        assert!(app.palette.is_some());
+        frame(&mut app, &ctx, vec![egui::Event::Text("delete col".into())]);
+        frame(&mut app, &ctx, vec![press(Modifiers::NONE, Key::Enter)]);
+        assert!(app.palette.is_none());
+        let mut expected = TABLE.to_owned();
+        table::apply(&mut expected, at..at, table::Op::DeleteCol).unwrap();
+        assert_eq!(app.docs[0].text, expected);
+
+        let (mut app, _files, ctx, _) = source_app("palette-insert", "intro", "intro");
+        frame(&mut app, &ctx, vec![press(CTRL, Key::P)]);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text("insert table".into())],
+        );
+        frame(&mut app, &ctx, vec![press(Modifiers::NONE, Key::Enter)]);
+        assert!(app.palette.is_some(), "asks for the size");
+        // The prefilled 3x2 is selected, so typing replaces it.
+        frame(&mut app, &ctx, vec![egui::Event::Text("4x1".into())]);
+        frame(&mut app, &ctx, vec![press(Modifiers::NONE, Key::Enter)]);
+        assert!(app.palette.is_none());
+        assert_eq!(
+            app.docs[0].text,
+            "intro\n\n|     |     |     |     |\n| --- | --- | --- | --- |\n|     |     |     |     |\n"
+        );
+        // Typing lands in the first header cell.
+        frame(&mut app, &ctx, vec![egui::Event::Text("Name".into())]);
+        assert!(app.docs[0].text.starts_with("intro\n\n| Name"));
+    }
+
+    #[test]
+    fn palette_lists_app_commands_and_escape_closes_it() {
+        let (mut app, _files, ctx, _) = source_app("palette-zoom", "text", "text");
+        let zoom = ctx.zoom_factor();
+        frame(&mut app, &ctx, vec![press(CTRL, Key::P)]);
+        frame(&mut app, &ctx, vec![egui::Event::Text("zoom in".into())]);
+        frame(&mut app, &ctx, vec![press(Modifiers::NONE, Key::Enter)]);
+        frame(&mut app, &ctx, vec![]);
+        assert!(ctx.zoom_factor() > zoom);
+        frame(&mut app, &ctx, vec![press(CTRL, Key::P)]);
+        frame(&mut app, &ctx, vec![press(Modifiers::NONE, Key::Escape)]);
+        assert!(app.palette.is_none());
+        // Ctrl+B still bolds through the shared command list.
+        frame(&mut app, &ctx, vec![press(CTRL, Key::B)]);
+        assert_eq!(app.docs[0].text, "text****");
     }
 
     #[test]

@@ -8,7 +8,8 @@ use eframe::egui::{self, Event, Key, Modifiers};
 use egui::text::{CCursor, CCursorRange, LayoutJob};
 use egui_commonmark::{CommonMarkCache, CommonMarkScrollOptions, CommonMarkViewer};
 
-use crate::{pressed, source};
+use crate::source;
+use crate::table::{self, Op};
 
 pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
 /// Above this, the reading view is virtualized and task checkboxes are read-only.
@@ -404,8 +405,12 @@ impl Doc {
         }
     }
 
+    pub fn source_id(&self) -> egui::Id {
+        self.id().with("source")
+    }
+
     pub fn source_view(&mut self, ui: &mut egui::Ui, focus: bool) {
-        let id = self.id().with("source");
+        let id = self.source_id();
         if self.reset_editor {
             if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
                 let n = self.text.chars().count();
@@ -419,15 +424,6 @@ impl Doc {
                 state.store(ui.ctx(), id);
             }
             self.reset_editor = false;
-        }
-        for (key, before, after) in [
-            (Key::B, "**", "**"),
-            (Key::I, "*", "*"),
-            (Key::K, "[", "]()"),
-        ] {
-            if pressed(ui, key) {
-                self.format_selection(ui.ctx(), id, before, after);
-            }
         }
         self.typing_helpers(ui, id);
 
@@ -478,6 +474,8 @@ impl Doc {
         let sorted = range.as_sorted_char_range();
         let mut sel = sorted.start.0..sorted.end.0;
         let mut changed = false;
+        // Undo points around each table action, so one Ctrl+Z reverts exactly one.
+        let mut undo_points = Vec::new();
         // ponytail: stop at the first edit we leave to the TextEdit so events keep their
         // order; a helper may be skipped when several keystrokes land in one frame.
         let mut stop = false;
@@ -523,12 +521,48 @@ impl Doc {
                     Event::Text(t) if t.chars().count() == 1 => {
                         source::Input::Char(t.chars().next().unwrap_or_default())
                     }
-                    Event::Text(_) | Event::Paste(_) | Event::Cut => {
+                    Event::Paste(clip) => {
+                        let before = self.text.clone();
+                        let Some(new) = table::paste(&mut self.text, sel.clone(), clip) else {
+                            stop = true;
+                            return true;
+                        };
+                        // Raw paste first, then the table: Ctrl+Z turns it back into text.
+                        let mut raw = before.clone();
+                        let (a, b) = (
+                            source::byte_at(&raw, sel.start),
+                            source::byte_at(&raw, sel.end),
+                        );
+                        raw.replace_range(a..b, clip);
+                        let raw_end = sel.start + clip.chars().count();
+                        undo_points.extend([
+                            (cursor(&sel), before),
+                            (cursor(&(raw_end..raw_end)), raw),
+                            (cursor(&new), self.text.clone()),
+                        ]);
+                        (sel, changed) = (new, true);
+                        return false;
+                    }
+                    Event::Text(_) | Event::Cut => {
                         stop = true;
                         return true;
                     }
                     _ => return true,
                 };
+                let op = match input {
+                    source::Input::Indent => Some(Op::Next),
+                    source::Input::Outdent => Some(Op::Prev),
+                    source::Input::Enter => Some(Op::NextRow),
+                    _ => None,
+                };
+                if let Some(op) = op {
+                    let before = (cursor(&sel), self.text.clone());
+                    if let Some(new) = table::apply(&mut self.text, sel.clone(), op) {
+                        undo_points.extend([before, (cursor(&new), self.text.clone())]);
+                        (sel, changed) = (new, true);
+                        return false;
+                    }
+                }
                 match source::edit(&mut self.text, sel.clone(), input) {
                     Some(new) => {
                         (sel, changed) = (new, true);
@@ -542,15 +576,55 @@ impl Doc {
             });
         });
         if changed {
-            let (a, b) = (CCursor::new(sel.start), CCursor::new(sel.end));
-            state.cursor.set_char_range(Some(CCursorRange::two(a, b)));
+            state.cursor.set_char_range(Some(cursor(&sel)));
+            add_undo_points(&mut state, &undo_points);
             state.store(ui.ctx(), id);
             self.mark_edited();
         }
     }
 
+    /// Whether the Source view cursor is in a table the table helpers act on.
+    pub fn cursor_in_table(&self, ctx: &egui::Context) -> bool {
+        egui::TextEdit::load_state(ctx, self.source_id())
+            .and_then(|s| s.cursor.char_range())
+            .is_some_and(|r| table::at(&self.text, r.as_sorted_char_range().start.0))
+    }
+
+    /// Applies a table command at the Source view cursor as one undo step.
+    pub fn run_table(&mut self, ctx: &egui::Context, op: Op) {
+        self.edit_at_cursor(ctx, |text, sel| table::apply(text, sel, op));
+    }
+
+    pub fn insert_table(&mut self, ctx: &egui::Context, cols: usize, rows: usize) {
+        self.edit_at_cursor(ctx, |text, sel| Some(table::insert(text, sel, cols, rows)));
+    }
+
+    fn edit_at_cursor(
+        &mut self,
+        ctx: &egui::Context,
+        f: impl FnOnce(&mut String, Range<usize>) -> Option<Range<usize>>,
+    ) {
+        let id = self.source_id();
+        let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+        let sel = state.cursor.char_range().map_or(0..0, |r| {
+            let r = r.as_sorted_char_range();
+            r.start.0..r.end.0
+        });
+        let before = (cursor(&sel), self.text.clone());
+        let Some(new) = f(&mut self.text, sel) else {
+            return;
+        };
+        state.cursor.set_char_range(Some(cursor(&new)));
+        if self.text != before.1 {
+            add_undo_points(&mut state, &[before, (cursor(&new), self.text.clone())]);
+            self.mark_edited();
+        }
+        state.store(ctx, id);
+    }
+
     /// Obsidian-style Ctrl+B/I/K: wrap the selection (or insert markers at the cursor).
-    fn format_selection(&mut self, ctx: &egui::Context, id: egui::Id, before: &str, after: &str) {
+    pub fn format_selection(&mut self, ctx: &egui::Context, before: &str, after: &str) {
+        let id = self.source_id();
         let Some(mut state) = egui::TextEdit::load_state(ctx, id) else {
             return;
         };
@@ -569,6 +643,23 @@ impl Doc {
         state.store(ctx, id);
         self.mark_edited();
     }
+}
+
+fn cursor(sel: &Range<usize>) -> CCursorRange {
+    CCursorRange::two(CCursor::new(sel.start), CCursor::new(sel.end))
+}
+
+type UndoState = (CCursorRange, String);
+
+fn add_undo_points(state: &mut egui::text_edit::TextEditState, points: &[UndoState]) {
+    if points.is_empty() {
+        return;
+    }
+    let mut undoer = state.undoer();
+    for point in points {
+        undoer.add_undo(point);
+    }
+    state.set_undoer(undoer);
 }
 
 #[cfg(test)]
@@ -644,6 +735,98 @@ mod tests {
                 .clear();
         }
         assert_eq!(doc.text, "- a\n- (b)");
+    }
+
+    fn press(key: Key, modifiers: Modifiers) -> Event {
+        Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// Shows Source view for one frame with `events`.
+    fn frame(doc: &mut Doc, ctx: &egui::Context, events: Vec<Event>) {
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| doc.source_view(ui, true))
+            .textures_delta
+            .clear();
+    }
+
+    /// A focused Source view with the cursor after the first `after`.
+    fn editor_at(doc: &mut Doc, after: &str) -> egui::Context {
+        let ctx = egui::Context::default();
+        frame(doc, &ctx, vec![]);
+        let at = doc.text[..doc.text.find(after).unwrap() + after.len()]
+            .chars()
+            .count();
+        let mut state = egui::TextEdit::load_state(&ctx, doc.source_id()).unwrap();
+        state.cursor.set_char_range(Some(cursor(&(at..at))));
+        state.store(&ctx, doc.source_id());
+        ctx
+    }
+
+    const TABLE: &str = "| a | b |\n|---|---|\n| c | d |";
+
+    #[test]
+    fn tab_and_enter_walk_a_table_and_each_undoes_in_one_step() {
+        let mut doc = temp_doc("table-keys", TABLE);
+        let ctx = editor_at(&mut doc, "| c");
+        frame(&mut doc, &ctx, vec![press(Key::Tab, Modifiers::NONE)]);
+        let aligned = "| a   | b   |\n| --- | --- |\n| c   | d   |";
+        assert_eq!(doc.text, aligned);
+        frame(&mut doc, &ctx, vec![press(Key::Z, Modifiers::COMMAND)]);
+        assert_eq!(doc.text, TABLE);
+        // Typing after an action: the typing undoes first, then the action.
+        frame(&mut doc, &ctx, vec![press(Key::Tab, Modifiers::NONE)]);
+        frame(&mut doc, &ctx, vec![Event::Text("x".into())]);
+        assert_eq!(doc.text, "| a   | b   |\n| --- | --- |\n| c   | dx   |");
+        frame(&mut doc, &ctx, vec![press(Key::Z, Modifiers::COMMAND)]);
+        assert_eq!(doc.text, aligned);
+        frame(&mut doc, &ctx, vec![press(Key::Z, Modifiers::COMMAND)]);
+        assert_eq!(doc.text, TABLE);
+        // Enter adds a row below the last one; Enter on that empty row leaves the table.
+        frame(&mut doc, &ctx, vec![press(Key::Tab, Modifiers::NONE)]);
+        frame(&mut doc, &ctx, vec![press(Key::Enter, Modifiers::NONE)]);
+        frame(&mut doc, &ctx, vec![press(Key::Enter, Modifiers::NONE)]);
+        frame(&mut doc, &ctx, vec![Event::Text("after".into())]);
+        assert_eq!(doc.text, format!("{aligned}\nafter"));
+    }
+
+    #[test]
+    fn shift_enter_in_a_table_is_a_plain_newline_and_lists_still_indent() {
+        let mut doc = temp_doc("table-shift-enter", TABLE);
+        let ctx = editor_at(&mut doc, "| c");
+        frame(&mut doc, &ctx, vec![press(Key::Enter, Modifiers::SHIFT)]);
+        assert_eq!(doc.text, "| a | b |\n|---|---|\n| c\n | d |");
+        let mut doc = temp_doc("list-tab", "x\n- a");
+        let ctx = editor_at(&mut doc, "- a");
+        frame(&mut doc, &ctx, vec![press(Key::Tab, Modifiers::NONE)]);
+        assert_eq!(doc.text, "x\n\t- a");
+    }
+
+    #[test]
+    fn pasted_spreadsheet_cells_become_a_table_and_undo_to_the_raw_text() {
+        let mut doc = temp_doc("paste", "intro");
+        let ctx = editor_at(&mut doc, "intro");
+        let clip = "a\tb\nc\td\n";
+        frame(&mut doc, &ctx, vec![Event::Paste(clip.into())]);
+        assert_eq!(
+            doc.text,
+            "intro\n\n| a   | b   |\n| --- | --- |\n| c   | d   |\n"
+        );
+        frame(&mut doc, &ctx, vec![press(Key::Z, Modifiers::COMMAND)]);
+        assert_eq!(doc.text, format!("intro{clip}"));
+        frame(&mut doc, &ctx, vec![press(Key::Z, Modifiers::COMMAND)]);
+        assert_eq!(doc.text, "intro");
+        // Not a grid: an ordinary paste.
+        frame(&mut doc, &ctx, vec![Event::Paste(" more".into())]);
+        assert_eq!(doc.text, "intro more");
     }
 
     #[test]

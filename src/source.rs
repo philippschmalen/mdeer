@@ -32,9 +32,11 @@ pub fn options() -> Options {
 /// One kind per byte; later (inner) spans overwrite earlier (outer) ones.
 fn classify(text: &str) -> Vec<Kind> {
     let mut kinds = vec![Kind::Text; text.len()];
+    let mut tables = Vec::new();
     let mut paint = |r: Range<usize>, k| kinds[r].fill(k);
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         match event {
+            Event::Start(Tag::Table(_)) => tables.push(range),
             Event::Start(Tag::Heading { .. }) => paint(range, Kind::Heading),
             Event::Start(Tag::Emphasis) => paint(range, Kind::Emphasis),
             Event::Start(Tag::Strong) => paint(range, Kind::Strong),
@@ -45,6 +47,25 @@ fn classify(text: &str) -> Vec<Kind> {
             Event::Html(_) | Event::InlineHtml(_) | Event::Rule => paint(range, Kind::Muted),
             _ => {}
         }
+    }
+    // Table syntax is dimmed: the separator row and every unescaped pipe.
+    for table in tables {
+        let mut escaped = false;
+        for (i, b) in text[table.clone()].bytes().enumerate() {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'|' => paint(table.start + i..table.start + i + 1, Kind::Muted),
+                _ => {}
+            }
+        }
+        let header_end = text[table.clone()]
+            .find('\n')
+            .map_or(table.end, |i| table.start + i + 1);
+        let sep_end = text[header_end..table.end]
+            .find('\n')
+            .map_or(table.end, |i| header_end + i);
+        paint(header_end..sep_end, Kind::Muted);
     }
     let mut offset = 0;
     let mut conflict = None;
@@ -101,7 +122,7 @@ pub fn highlight(text: &str, font_id: &FontId) -> LayoutJob {
 }
 
 /// Byte offset of the `char_idx`-th char.
-fn byte_at(text: &str, char_idx: usize) -> usize {
+pub(crate) fn byte_at(text: &str, char_idx: usize) -> usize {
     text.char_indices()
         .nth(char_idx)
         .map_or(text.len(), |(b, _)| b)
@@ -136,14 +157,14 @@ fn closer(open: char) -> Option<char> {
 }
 
 /// Char cursor at byte offset `b`.
-fn caret(text: &str, b: usize) -> Range<usize> {
+pub(crate) fn caret(text: &str, b: usize) -> Range<usize> {
     let c = text[..b].chars().count();
     c..c
 }
 
 /// `(indent, marker, next)` of a list item or quote line: leading whitespace,
 /// the marker with its trailing space, and the marker a continuation line gets.
-fn marker(line: &str) -> Option<(&str, &str, String)> {
+pub(crate) fn marker(line: &str) -> Option<(&str, &str, String)> {
     let rest = line.trim_start_matches([' ', '\t']);
     let indent = &line[..line.len() - rest.len()];
     let b = rest.as_bytes();
@@ -363,6 +384,24 @@ mod tests {
         let k = classify("# Hi **b**\n");
         assert!(k[..5].iter().all(|&k| k == Kind::Heading));
         assert!(k[5..10].iter().all(|&k| k == Kind::Strong));
+    }
+
+    #[test]
+    fn table_pipes_and_separator_are_dimmed() {
+        let text = "| a | **b** \\| c |\n|---|:-:|\n| d | e |\n";
+        let k = classify(text);
+        let kind_at = |s: &str| k[text.find(s).unwrap()];
+        for (i, b) in text.bytes().enumerate() {
+            if b == b'|' && text.as_bytes()[i - usize::from(i > 0)] != b'\\' {
+                assert!(k[i] == Kind::Muted, "pipe at {i}");
+            }
+        }
+        assert!(kind_at("\\|") == Kind::Text && k[text.find("\\|").unwrap() + 1] == Kind::Text);
+        assert!(kind_at("**b") == Kind::Strong);
+        assert!(kind_at("a") == Kind::Text && kind_at("d") == Kind::Text);
+        let sep = text.find("|---").unwrap();
+        assert!(k[sep..sep + 9].iter().all(|&k| k == Kind::Muted));
+        assert_eq!(highlight(text, &FontId::monospace(12.0)).text, text);
     }
 
     #[test]
