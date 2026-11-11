@@ -9,3 +9,5 @@
 - **External change**: a change to an open file made outside MDeer.
 - **Merge**: combining local edits and external changes relative to their common earlier version.
 - **Conflict**: overlapping local edits and external changes that cannot be merged automatically. A conflict can be saved but still need resolution.
+- **Command palette**: the `Ctrl+P` list of every command with its shortcut, filtered as you type (see ADR-0007).
+- **Table helper**: a Source view action that edits a GFM table as text — moving between cells, changing rows and columns, inserting or pasting a table — and realigns only that table (see ADR-0008).
