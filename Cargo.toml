@@ -42,3 +42,10 @@ strip = true
 [features]
 # dev only: EFRAME_SCREENSHOT_TO=out.png cargo run -F screenshot -- file.md
 screenshot = ["eframe/__screenshot"]
+
+
+# ponytail: fork until lampsitter/egui_commonmark ships the table-in-list fix; drop this then.
+# crates.io ignores [patch], so `cargo install mdeer` still has the bug until upstream releases.
+[patch.crates-io]
+egui_commonmark = { git = "https://github.com/philippschmalen/egui_commonmark", rev = "dcace24e59000220227175e1d12fda3ecac7d556" }
+egui_commonmark_backend = { git = "https://github.com/philippschmalen/egui_commonmark", rev = "dcace24e59000220227175e1d12fda3ecac7d556" }

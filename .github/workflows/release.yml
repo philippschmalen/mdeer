@@ -25,7 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish --locked
+      # crates.io drops [patch], so a patched build would publish without its fixes.
+      - run: |
+          if grep -q '^\[patch.crates-io\]' Cargo.toml; then
+            echo "::notice::Skipping crates.io: Cargo.toml has [patch.crates-io]"
+          else
+            cargo publish --locked
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
