@@ -4536,7 +4536,7 @@ SOFTWARE.
 
 Used by:
 
-- [mdeer 0.5.0](https://github.com/philippschmalen/mdeer)
+- [mdeer 0.5.1](https://github.com/philippschmalen/mdeer)
 
 ```
 MIT License
